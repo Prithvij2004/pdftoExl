@@ -4,16 +4,36 @@ Guidance for Claude Code when working in this repository.
 
 ## Project Overview
 
-**pdftoxl** is an evaluation harness for a PDF → EAB-Excel form-extraction pipeline. It is **not** the pipeline itself — it scores candidate `.xlsx` outputs (and future enriched-JSON intermediates) against curated golden fixtures so any pipeline implementation can be measured with the same metrics.
+**pdftoxl** contains two cooperating pieces:
 
-Language: Python 3.11+. CLI framework: Typer. Excel I/O: openpyxl. Contracts: Pydantic v2.
+1. **PipelineV1** (`src/pdftoxl/pipeline_v1/`) — the PDF → EAB-Excel form-extraction pipeline itself. Stages run end-to-end and emit an `.xlsx` in the EAB template shape.
+2. **Evals harness** (`src/pdftoxl/evals/`) — pipeline-agnostic scoring that grades any candidate `.xlsx` (and future enriched-JSON intermediates) against curated golden fixtures.
+
+Language: Python 3.11+. CLI framework: Typer. Excel I/O: openpyxl. Contracts: Pydantic v2. LLM: AWS Bedrock via boto3.
 
 ## Directory Layout
 
 ```
 pdftoExl/
 ├── src/pdftoxl/
+│   ├── cli.py                      # `pdftoxl` CLI — runs PipelineV1 on a fixture
 │   ├── pipeline.py                 # Pipeline protocol
+│   ├── adapters/                   # Third-party SDK wrappers (keep stages SDK-free)
+│   │   ├── bedrock.py              # Bedrock Messages-API client
+│   │   ├── env.py                  # .env → os.environ loader
+│   │   └── logging.py              # structlog configuration
+│   ├── pipeline_v1/                # Concrete pipeline implementation
+│   │   ├── pipeline.py             # PipelineV1 + build_pipeline()
+│   │   ├── config.py               # PipelineConfig (pydantic-settings) + load_config()
+│   │   └── stages/                 # extraction → classification → gate → llm →
+│   │       │                       #   merge → mapping → output
+│   │       ├── extraction.py       # PDF → raw blocks
+│   │       ├── classification.py   # Rule-based block typing
+│   │       ├── gate.py             # Confidence gate; defers low-confidence to LLM
+│   │       ├── llm.py              # Bedrock-backed enrichment for deferred blocks
+│   │       ├── merge.py            # Combine accepted + enriched, drop low-conf
+│   │       ├── mapping.py          # Blocks → 28-column EAB rows
+│   │       └── output.py           # Write rows into template `.xlsx`
 │   └── evals/
 │       ├── cli.py                  # `pdftoxl-evals` Typer app
 │       ├── runner.py               # run_eval_b, run_eval_c, run_all
@@ -30,6 +50,8 @@ pdftoExl/
 │       │   ├── eval_d.py           # Semantic equivalence (stub)
 │       │   └── eval_e.py           # Cost/latency telemetry (stub)
 │       └── scripts/export_schema.py
+├── config.yaml                     # Default PipelineV1 config (stages, thresholds, Bedrock)
+├── .env.example                    # Copy to `.env` for AWS creds + overrides
 ├── evals/
 │   ├── fixtures.yaml               # Fixture catalogue
 │   ├── fixtures/
@@ -57,6 +79,44 @@ make lint           # ruff check src tests
 make test           # pytest
 make eval           # Eval B + Eval C on all fixtures
 ```
+
+## Running the Pipeline (PDF → .xlsx)
+
+Entrypoint: `pdftoxl` (defined in `pyproject.toml` → `pdftoxl.cli:app`). PipelineV1 runs against a **fixture ID** — the fixture's `input.pdf` is the input and the fixture's `golden.xlsx` is reused as the output template (so the EAB sheet/columns/formatting are preserved).
+
+```bash
+# Offline run (stages 1–3 + 5–7; LLM stage skipped — no AWS creds needed)
+pdftoxl run --fixture FX-TXLTSS-001 --out /tmp/txltss.xlsx
+
+# Full run with the Bedrock LLM stage enabled
+cp .env.example .env    # fill in AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION
+pdftoxl run --fixture FX-CHOICES-001 --out /tmp/choices.xlsx --with-llm
+
+# Custom pipeline config (stage toggles, thresholds, Bedrock model)
+pdftoxl run --fixture FX-CHOICES-001 --out /tmp/out.xlsx --config ./config.yaml
+
+# Custom fixtures catalogue
+pdftoxl run --fixture FX-X --out /tmp/out.xlsx --fixtures-yaml path/to/fixtures.yaml
+```
+
+Scoring a produced workbook against its golden:
+
+```bash
+pdftoxl-evals run --eval B --fixture FX-CHOICES-001 --candidate /tmp/choices.xlsx
+pdftoxl-evals run --eval C --fixture FX-CHOICES-001 --candidate /tmp/choices.xlsx
+```
+
+### Using a PDF that is not yet a fixture
+
+The CLI only accepts fixture IDs, so to run an arbitrary PDF, register it as a fixture first (see **Adding a Fixture** below): drop `input.pdf` (and a template `golden.xlsx`) under `evals/fixtures/FX-<NAME>/`, add the entry to `evals/fixtures.yaml`, then `pdftoxl run --fixture FX-<NAME> --out …`.
+
+### Configuration precedence
+
+`--config` flag → `PDFTOXL_CONFIG` env → `./config.yaml` → built-in defaults. Any field can be overridden by env vars prefixed `PDFTOXL_` with `__` as the nested delimiter (e.g. `PDFTOXL_BEDROCK__MODEL_ID=...`, `PDFTOXL_STAGES__LLM=false`). AWS creds + `BEDROCK_MODEL_ID` come from `.env` (see `.env.example`).
+
+### Pipeline stages
+
+Each stage is a pure function taking the previous stage's artifact; toggle any of them in `config.yaml` under `stages:` while iterating. The `--with-llm` flag is required in addition to `stages.llm: true` for the Bedrock client to actually be built — this keeps tests and offline runs from needing AWS credentials.
 
 ## Running Evals
 
