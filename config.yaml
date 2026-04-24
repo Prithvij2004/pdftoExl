@@ -1,0 +1,41 @@
+# PipelineV1 configuration.
+# Anything here can be overridden with CLI flags (--config path) or env vars
+# prefixed with PDFTOXL_ (e.g. PDFTOXL_BEDROCK__MODEL_ID).
+
+pipeline_version: "v1"
+
+bedrock:
+  # Bedrock model invoked by the LLM stage.
+  model_id: "amazon.nova-2-lite-v1:0"
+  region: "us-west-2"
+  max_tokens: 4096
+  temperature: 0.0
+  # Optional per-request timeout (seconds).
+  timeout_seconds: 60
+
+stages:
+  # Toggle individual stages on/off while iterating on the pipeline.
+  extraction: true
+  classification: true
+  gate: true
+  llm: true
+  merge: true
+  mapping: true
+  output: true
+
+thresholds:
+  # Confidence cutoff for the rule/LLM gate stage.
+  gate_confidence: 0.75
+  # Minimum per-block confidence retained after merge.
+  min_block_confidence: 0.05
+
+paths:
+  fixtures_yaml: "evals/fixtures.yaml"
+  # Template workbook used when a fixture's golden is unavailable.
+  # Leave empty to require the fixture's golden_xlsx_path.
+  default_template_xlsx: ""
+
+logging:
+  level: "INFO"
+  # "console" for human-readable, "json" for structured.
+  renderer: "console"
