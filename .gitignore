@@ -12,3 +12,5 @@ build/
 dist/
 .DS_Store
 evals/reports/
+.env
+
