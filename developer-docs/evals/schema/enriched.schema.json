@@ -1,0 +1,246 @@
+{
+  "$defs": {
+    "BBox": {
+      "additionalProperties": false,
+      "properties": {
+        "coord_origin": {
+          "enum": [
+            "top_left",
+            "bottom_left"
+          ],
+          "title": "Coord Origin",
+          "type": "string"
+        },
+        "x0": {
+          "title": "X0",
+          "type": "number"
+        },
+        "x1": {
+          "title": "X1",
+          "type": "number"
+        },
+        "y0": {
+          "title": "Y0",
+          "type": "number"
+        },
+        "y1": {
+          "title": "Y1",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x0",
+        "y0",
+        "x1",
+        "y1",
+        "coord_origin"
+      ],
+      "title": "BBox",
+      "type": "object"
+    },
+    "BlockType": {
+      "enum": [
+        "section_header",
+        "subsection_header",
+        "question_label",
+        "checkbox_option",
+        "radio_option",
+        "text_input",
+        "text_area",
+        "date_input",
+        "display",
+        "signature_field",
+        "table_header",
+        "table_cell",
+        "page_header",
+        "page_footer",
+        "unknown"
+      ],
+      "title": "BlockType",
+      "type": "string"
+    },
+    "EnrichedBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "bbox": {
+          "$ref": "#/$defs/BBox"
+        },
+        "block_id": {
+          "title": "Block Id",
+          "type": "string"
+        },
+        "block_type": {
+          "$ref": "#/$defs/BlockType"
+        },
+        "branching_logic": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Branching Logic"
+        },
+        "confidence": {
+          "maximum": 0.99,
+          "minimum": 0.05,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "page": {
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "parent_link": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ParentLink"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "question_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Question Type"
+        },
+        "reading_order": {
+          "title": "Reading Order",
+          "type": "integer"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "block_id",
+        "page",
+        "reading_order",
+        "bbox",
+        "text",
+        "block_type",
+        "confidence",
+        "provenance"
+      ],
+      "title": "EnrichedBlock",
+      "type": "object"
+    },
+    "ParentLink": {
+      "additionalProperties": false,
+      "properties": {
+        "parent_block_id": {
+          "title": "Parent Block Id",
+          "type": "string"
+        },
+        "relation": {
+          "enum": [
+            "option_of",
+            "input_of",
+            "row_of",
+            "child_of_section"
+          ],
+          "title": "Relation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "parent_block_id",
+        "relation"
+      ],
+      "title": "ParentLink",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "enum": [
+            "rule",
+            "llm",
+            "merge"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "properties": {
+        "page_count": {
+          "title": "Page Count",
+          "type": "integer"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha256",
+        "page_count"
+      ],
+      "title": "Source",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "blocks": {
+      "items": {
+        "$ref": "#/$defs/EnrichedBlock"
+      },
+      "title": "Blocks",
+      "type": "array"
+    },
+    "schema_version": {
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/Source"
+    }
+  },
+  "required": [
+    "schema_version",
+    "source",
+    "blocks"
+  ],
+  "title": "EnrichedDocument",
+  "type": "object"
+}
