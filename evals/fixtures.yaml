@@ -1,0 +1,18 @@
+fixtures:
+  - id: FX-CHOICES-001
+    pdf_path: evals/fixtures/FX-CHOICES-001/input.pdf
+    golden_xlsx_path: evals/fixtures/FX-CHOICES-001/golden.xlsx
+    reference_xlsx_path: evals/fixtures/FX-CHOICES-001/golden.xlsx
+    question_sheet: "Assessment v2"
+    header_row: 13
+    schema_version: "1.0.0"
+    notes: "TennCare CHOICES Safety Determination Request (multi-page form)."
+
+  - id: FX-TXLTSS-001
+    pdf_path: evals/fixtures/FX-TXLTSS-001/input.pdf
+    golden_xlsx_path: evals/fixtures/FX-TXLTSS-001/golden.xlsx
+    reference_xlsx_path: evals/fixtures/FX-TXLTSS-001/golden.xlsx
+    question_sheet: "Assessment"
+    header_row: 14
+    schema_version: "1.0.0"
+    notes: "TX LTSS H1700-3 ISP Signature Page (single page, signatures)."

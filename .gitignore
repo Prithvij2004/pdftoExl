@@ -1,6 +1,14 @@
 # /developer-docs
-.venv/
+
 __pycache__/
-*.egg-info/
 *.pyc
+*.pyo
 .pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.DS_Store
+evals/reports/

@@ -264,8 +264,8 @@ def test_run_eval_a_perfect_self_compare():
     assert result.sequence_correctness == 1.0
 
 
-def test_contracts_a_validates():
-    from pdftoxl.evals._contracts_a import EnrichedDocument
+def test_contracts_validates():
+    from pdftoxl.evals.contracts import EnrichedDocument
 
     doc = _doc([_block("a", text="a", sequence=1)])
     parsed = EnrichedDocument.model_validate(doc)

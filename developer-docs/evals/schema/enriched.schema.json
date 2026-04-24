@@ -4,6 +4,7 @@
       "additionalProperties": false,
       "properties": {
         "coord_origin": {
+          "default": "top_left",
           "enum": [
             "top_left",
             "bottom_left"
@@ -32,8 +33,7 @@
         "x0",
         "y0",
         "x1",
-        "y1",
-        "coord_origin"
+        "y1"
       ],
       "title": "BBox",
       "type": "object"
@@ -155,6 +155,25 @@
       "title": "EnrichedBlock",
       "type": "object"
     },
+    "EnrichedSource": {
+      "additionalProperties": false,
+      "properties": {
+        "page_count": {
+          "title": "Page Count",
+          "type": "integer"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha256",
+        "page_count"
+      ],
+      "title": "EnrichedSource",
+      "type": "object"
+    },
     "ParentLink": {
       "additionalProperties": false,
       "properties": {
@@ -198,25 +217,6 @@
       ],
       "title": "Provenance",
       "type": "object"
-    },
-    "Source": {
-      "additionalProperties": false,
-      "properties": {
-        "page_count": {
-          "title": "Page Count",
-          "type": "integer"
-        },
-        "sha256": {
-          "title": "Sha256",
-          "type": "string"
-        }
-      },
-      "required": [
-        "sha256",
-        "page_count"
-      ],
-      "title": "Source",
-      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -233,7 +233,7 @@
       "type": "string"
     },
     "source": {
-      "$ref": "#/$defs/Source"
+      "$ref": "#/$defs/EnrichedSource"
     }
   },
   "required": [

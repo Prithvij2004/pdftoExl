@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pdftoxl.evals._contracts_a import EnrichedDocument
+from pdftoxl.evals.contracts import EnrichedDocument
 
 
 def export(path: Path) -> None:

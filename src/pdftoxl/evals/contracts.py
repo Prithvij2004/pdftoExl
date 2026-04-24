@@ -1,14 +1,8 @@
-"""Minimal Boundary 1 Pydantic models for Eval A.
-
-Temporary module to avoid collision with the core worktree's contracts.py.
-Will be reconciled at merge. Mirrors the schema in
-developer-docs/evals/contracts.md (Boundary 1).
-"""
-
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal, Optional
+from pathlib import Path
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -43,7 +37,7 @@ class BBox(BaseModel):
     y0: float
     x1: float
     y1: float
-    coord_origin: CoordOrigin
+    coord_origin: CoordOrigin = "top_left"
 
 
 class ParentLink(BaseModel):
@@ -59,13 +53,6 @@ class Provenance(BaseModel):
     source: ProvenanceSource
 
 
-class Source(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    sha256: str
-    page_count: int
-
-
 class EnrichedBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -76,16 +63,50 @@ class EnrichedBlock(BaseModel):
     text: str
     block_type: BlockType
     confidence: float = Field(ge=0.05, le=0.99)
-    parent_link: Optional[ParentLink] = None
-    branching_logic: Optional[str] = None
-    sequence: Optional[int] = None
-    question_type: Optional[str] = None
+    parent_link: ParentLink | None = None
+    branching_logic: str | None = None
+    sequence: int | None = None
+    question_type: str | None = None
     provenance: Provenance
+
+
+class EnrichedSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sha256: str
+    page_count: int
 
 
 class EnrichedDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: str
-    source: Source
+    source: EnrichedSource
     blocks: list[EnrichedBlock]
+
+
+class FixtureManifest(BaseModel):
+    id: str
+    pdf_path: Path
+    golden_xlsx_path: Path
+    reference_xlsx_path: Path
+    question_sheet: str
+    header_row: int
+    template_version: str | None = None
+    schema_version: str | None = None
+    notes: str | None = None
+
+
+class MetricResult(BaseModel):
+    name: str
+    value: float | bool | int | str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+    passed: bool | None = None
+
+
+class EvalResult(BaseModel):
+    fixture_id: str
+    eval_name: str
+    metrics: list[MetricResult]
+    passed: bool
+    notes: str | None = None
