@@ -86,7 +86,10 @@ Rules:
 - Checkbox: standalone checkbox statement; answer_text "".
 - Checkbox Group: one row per group instruction; answer_text is statements pipe-separated.
 - Dropdown: one row; answer_text is options pipe-separated.
-- Display: static instructional text; answer_text "".
+- Display: static instructional or descriptive text. If the display content has a short
+  heading/title followed by a longer paragraph or description, put only the heading/title
+  in question_text and put the larger paragraph/description in answer_text. If there is no
+  separate body text, keep the display text in question_text and leave answer_text "".
 - Signature: signature line/box; answer_text "[Signature capture area]".
 - Group: section header/container; answer_text "".
 - Group Table: table data-entry block; answer_text describes columns and available empty rows.

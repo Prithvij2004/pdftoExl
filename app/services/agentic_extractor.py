@@ -58,6 +58,7 @@ def _bedrock_agent_bundle() -> _AgentBundle:
         system_prompt=(
             "You are an expert at reading PDF forms and converting them into structured form-field rows.\n"
             "Analyze the document and identify ALL user-fillable fields and important static instructions.\n"
+            "Classify fields by semantic intent, not by visual appearance alone. A blank box may be a Date, Number, Signature, Text Area, or another field type depending on the label and surrounding instructions.\n"
             "Translate non-English to English.\n"
             "Return data in the required structured output schema."
         ),
@@ -89,11 +90,21 @@ def _analysis_prompt(batch: PdfBatch) -> list[object]:
             "- question_type must be one of: "
             + ", ".join([qt.value for qt in QuestionType])
             + ".\n"
+            "- Do not default blank-looking fields to Text Box. First infer the best type from the label, expected answer, nearby instructions, options, and field constraints.\n"
+            "- Use Date when the label asks for a date, DOB, effective date, signature date, review date, or any date-formatted value even if the field looks like a plain blank.\n"
+            "- Use Number for numeric-only values such as age, quantity, amount, count, percentage, or score. For phone numbers, IDs, and case numbers, use Text Box unless the form clearly restricts the value to numeric input only.\n"
+            "- Use Signature when the label asks for a signature, initials, signer name in a signature block, or signature capture area.\n"
+            "- Use Text Area for comments, explanation, notes, narrative, description, address blocks, or any answer that expects multiple words/lines.\n"
+            "- Use Radio Button or Checkbox Group for option sets where the user selects one or many options; put options in answer_text separated by pipes.\n"
+            "- Use Checkbox for a single standalone checkbox statement.\n"
+            "- Use Dropdown only when the field is clearly a select/list choice rather than visible radio/checkbox options.\n"
+            "- Use Group Table for repeated row/column data-entry regions and Group for section headers/containers.\n"
             "- question_text should be the label/question/instruction in English.\n"
             "- answer_text describes what the user is expected to provide; options should be pipe-separated.\n"
+            "- For Display rows with a short heading/title and a larger paragraph or description, use the heading/title as question_text and the larger paragraph/description as answer_text. If there is no separate body text, keep answer_text empty.\n"
             "- page_number must be the absolute page number in the original PDF.\n"
             "- source_order starts at 0 for each page and increases top-to-bottom.\n"
-            "- rationale must be brief and specific.\n"
+            "- rationale must be brief and specific, and should mention the semantic clue used to choose the field type.\n"
         ),
         BinaryContent(data=batch.pdf_bytes, media_type="application/pdf"),
     ]
@@ -108,7 +119,10 @@ def _finalize_prompt(batch: PdfBatch, analysis: BatchAnalysis) -> list[object]:
             "Constraints:\n"
             "- Output ONLY rows (no extra commentary).\n"
             "- question_type must be exactly one of the allowed values.\n"
+            "- Preserve the best semantic type from the analysis. Do not change fields to Text Box just because they look like blanks.\n"
+            "- Re-check Date, Number, Signature, Text Area, option groups, tables, and section/display rows using the PDF context before finalizing.\n"
             "- question_text must be non-empty English.\n"
+            "- For Display rows, preserve a heading-plus-description split when present: heading/title in question_text, larger paragraph/description in answer_text.\n"
             "- Keep ordering stable by (page_number, source_order).\n"
             "- Store rationale in row.meta.rationale if helpful.\n\n"
             "Analyzed candidates JSON:\n"
