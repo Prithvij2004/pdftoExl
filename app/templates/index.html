@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PDF → Excel Extractor</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; }
+      .container { max-width: 980px; margin: 0 auto; padding: 32px 20px; }
+      .card { border: 1px solid rgba(127,127,127,0.35); border-radius: 14px; padding: 18px 18px; }
+      h1 { font-size: 22px; margin: 0 0 8px; }
+      p { margin: 8px 0; line-height: 1.45; }
+      .hint { opacity: 0.8; font-size: 14px; }
+      .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+      input[type="file"] { padding: 10px; border: 1px dashed rgba(127,127,127,0.55); border-radius: 10px; }
+      button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(127,127,127,0.35); background: transparent; cursor: pointer; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.95em; }
+      .cols { display: grid; grid-template-columns: 220px 1fr; gap: 10px 12px; margin-top: 10px; }
+      .cols div { padding: 8px 10px; border-radius: 10px; background: rgba(127,127,127,0.08); }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <h1>PDF → Excel (Form Extraction)</h1>
+        <p class="hint">
+          Upload a PDF form and download an Excel file with 3 columns:
+          <code>Question Type</code>, <code>English Question/Index Text</code>, <code>English Answer Text</code>.
+        </p>
+
+        <form action="/extract" method="post" enctype="multipart/form-data">
+          <div class="row">
+            <input type="file" name="file" accept="application/pdf" required />
+            <button type="submit">Extract to Excel</button>
+          </div>
+        </form>
+
+        <div style="margin-top: 18px">
+          <p class="hint"><strong>Output schema:</strong></p>
+          <div class="cols">
+            <div><strong>Question Type</strong></div>
+            <div>One of: Text Box, Text Area, Date, Number, Radio Button, Checkbox, Checkbox Group, Dropdown, Display, Signature, Group Table, Group</div>
+            <div><strong>English Question/Index Text</strong></div>
+            <div>The prompt/label text as it appears in the PDF (translated to English if needed)</div>
+            <div><strong>English Answer Text</strong></div>
+            <div>Expected response content (options pipe-separated for option groups)</div>
+          </div>
+        </div>
+      </div>
+      <p class="hint" style="margin-top: 10px">Health check: <code>GET /health</code></p>
+    </div>
+  </body>
+</html>
