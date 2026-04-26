@@ -14,7 +14,8 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import settings
 from app.services.excel_writer import write_rows_to_xlsx
-from app.services.extractor import _ensure_inference_profile_id, extract_rows_from_pdf
+from app.services.agentic_extractor import extract_rows_from_pdf_agentic
+from app.services.extractor import _ensure_inference_profile_id
 from app.services.normalize import normalize_rows
 
 
@@ -86,7 +87,7 @@ def aws_test():
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 def _safe_filename(name: str) -> str:
     base = os.path.basename(name or "upload.pdf")
@@ -155,7 +156,7 @@ async def extract(file: UploadFile = File(...)):
     file_id, pdf_path = await _persist_upload_pdf(file)
 
     try:
-        rows = extract_rows_from_pdf(pdf_path)
+        rows = await extract_rows_from_pdf_agentic(pdf_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
