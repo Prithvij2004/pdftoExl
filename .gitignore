@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+.env
+.claude/
+
+.DS_Store
+
+# Runtime files (uploads, generated xlsx, debug json)
+runtime/
+
+# Sample/source documents (often large/binary)
+docs/
