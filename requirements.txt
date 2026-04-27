@@ -15,3 +15,4 @@ openpyxl>=3.1.2
 pytest>=8.0.0
 
 logfire[fastapi,botocore]>=3.0.0
+opentelemetry-instrumentation-botocore==0.60b1

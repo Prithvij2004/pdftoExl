@@ -25,7 +25,7 @@ def test_golden_workbooks_have_expected_shape(case) -> None:
 def test_scoring_is_sane_on_identical_rows() -> None:
     expected = [
         ("Text Box", "Name", ""),
-        ("Date", "Date of birth", "[Date input – mm/dd/yyyy format]"),
+        ("Calendar", "Date of birth", "[Date input]"),
         ("Display", "Instructions", ""),
     ]
     actual = list(expected)

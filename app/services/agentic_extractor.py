@@ -61,11 +61,11 @@ def _bedrock_analysis_agent() -> Agent:
         system_prompt=(
             "You are an expert at reading PDF forms and converting them into structured form-field rows.\n"
             "Analyze the document and identify ALL user-fillable fields and important static instructions.\n"
-            "Classify fields by semantic intent, not by visual appearance alone. A blank box may be a Date, Number, Signature, Text Area, or another field type depending on the label and surrounding instructions.\n"
+            "Classify fields by semantic intent, not by visual appearance alone. A blank box may be a Calendar, Number, Signature, Text Area, or another field type depending on the label and surrounding instructions.\n"
             "Translate non-English to English.\n"
             "Return data in the required structured output schema."
         ),
-        model_settings={"temperature": 0.2, "max_tokens": 6000},
+        model_settings={"temperature": 0, "max_tokens": 6000},
     )
 
 
@@ -80,18 +80,27 @@ def _analysis_prompt(batch: PdfBatch) -> list[object]:
             + ", ".join([qt.value for qt in QuestionType])
             + ".\n"
             "- Do not default blank-looking fields to Text Box. First infer the best type from the label, expected answer, nearby instructions, options, and field constraints.\n"
-            "- Use Date when the label asks for a date, DOB, effective date, signature date, review date, or any date-formatted value even if the field looks like a plain blank.\n"
+            "- Use Radio Button for single-select answer options displayed: circles/bubbles, or instructions like 'select/choose one', 'only one', or Yes/No pairs. Put options in answer_text pipe-separated.\n"
+            "- Use Checkbox for a single standalone checkbox at the question level, with no separate option list in answer_text.\n"
+            "- Use Checkbox Group for multi-select answer options displayed, or when instructions say 'select all that apply', 'check all that apply', 'one or more', etc. Put options in answer_text pipe-separated.\n"
+            "- Use Text Area for free-text answers with multiple lines displayed, such as comments, explanations, notes, narratives, descriptions, or address blocks.\n"
+            "- Use Text Box for free-text answers with a single line displayed.\n"
+            "- Use Calendar when the label asks for a single date response, DOB, effective date, signature date, review date, or any date-formatted value even if the field looks like a plain blank.\n"
+            "- Use Display for static instructions or descriptive text with no answer choices.\n"
+            "- Use Dropdown only when the field is clearly a single-select list choice rather than visible radio/checkbox options.\n"
+            "- Use Equation for fields used to calculate a score or derived value. Put the visible calculation/formula in answer_text, or '[Calculated score]' if no formula is shown.\n"
             "- Use Number for numeric-only values such as age, quantity, amount, count, percentage, or score. For phone numbers, IDs, and case numbers, use Text Box unless the form clearly restricts the value to numeric input only.\n"
+            "- Use Radio Button with Text Area when a single-select option group includes an available free-text area, such as 'Other/specify/explain'. Keep options pipe-separated in answer_text and mark the text-entry option as shown, e.g. 'Other: [Text area]'.\n"
+            "- Use Checkbox Group with Text Area when a multi-select option group includes an available free-text area, such as 'Other/specify/explain'. Keep options pipe-separated in answer_text and mark the text-entry option as shown, e.g. 'Other: [Text area]'.\n"
             "- Use Signature when the label asks for a signature, initials, signer name in a signature block, or signature capture area.\n"
-            "- Use Text Area for comments, explanation, notes, narrative, description, address blocks, or any answer that expects multiple words/lines.\n"
-            "- Use Radio Button or Checkbox Group for option sets where the user selects one or many options; put options in answer_text separated by pipes.\n"
-            "- Use Checkbox for a single standalone checkbox statement.\n"
-            "- Use Dropdown only when the field is clearly a select/list choice rather than visible radio/checkbox options.\n"
-            "- Use Group Table for repeated row/column data-entry regions and Group for section headers/containers.\n"
+            "- If a question, option list, or large text/Display block is split across a page break, still emit a row for what appears on this page, and (when needed) a separate row on the next page with the same question text / question_type so downstream normalization can merge continuations. Use '(continued)' or 'Continued:' in question_text for continuation rows when the PDF clearly indicates continuation.\n"
             "- question_text should be the label/question/instruction in English.\n"
             "- answer_text describes what the user is expected to provide; options should be pipe-separated.\n"
             "- Treat every visually distinct paragraph as its OWN candidate row, even when adjacent paragraphs share the same surrounding heading or context. Never merge two paragraphs into a single question_text or answer_text.\n"
             "- For Display rows with a short heading/title and a larger paragraph or description, use the heading/title as question_text and the larger paragraph/description as answer_text. If there is no separate body text, keep answer_text empty. If there are multiple body paragraphs under one heading, emit one Display row per paragraph (heading may be repeated).\n"
+            "- Page headers/footers: avoid emitting generic repeated noise like page numbers (e.g. \"Page 1 of 3\"), timestamps, or branding-only lines.\n"
+            "- Do NOT emit header/footer-only metadata like form identifiers, control numbers, revision/version, or expiry/effective dates.\n"
+            "- If a header/footer contains completion-critical instructions or legal notices needed to fill/submit the form, emit it as a Display row.\n"
             "- Preserve bold formatting in question_text using Markdown bold markers `**...**` around any words/phrases that are visibly bold in the PDF. Do not bold text that is not actually bold. Do not use any other markdown.\n"
             "- This batch contains exactly ONE page; set page_number to that page number for every candidate.\n"
             "- source_order starts at 0 and increases strictly top-to-bottom in reading order.\n"

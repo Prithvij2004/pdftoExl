@@ -43,18 +43,19 @@ def _ensure_inference_profile_id(model_id: str, aws_region: str) -> str:
 
 def _build_prompt(start_page: int, end_page: int) -> str:
     allowed_types = [
-        "Text Box",
-        "Text Area",
-        "Date",
-        "Number",
         "Radio Button",
         "Checkbox",
         "Checkbox Group",
-        "Dropdown",
+        "Text Area",
+        "Text Box",
+        "Calendar",
         "Display",
+        "Dropdown",
+        "Equation",
+        "Number",
+        "Radio Button with Text Area",
+        "Checkbox Group with Text Area",
         "Signature",
-        "Group Table",
-        "Group",
     ]
 
     return f"""
@@ -78,27 +79,32 @@ Rules:
 - question_type MUST be exactly one of: {", ".join(allowed_types)}.
 - Preserve the exact wording as much as possible; if non-English is present, translate to English.
 - Do not invent answers; answer_text describes what the respondent is expected to provide.
-- Text Box: single-line blank/underscores; answer_text can be "" or "[Single-line text input field]".
-- Text Area: multi-line blank region; answer_text can be "" or "[Multi-line text input area – adjustable height]".
-- Calendar: date blank; answer_text "" or "[Date input – mm/dd/yyyy format]".
-- Number: numeric blank; answer_text "" or "[Numeric input only]".
-- Radio Button: one row per radio group; answer_text is options pipe-separated.
-- Checkbox: standalone checkbox statement; answer_text "".
-- Checkbox Group: one row per group instruction; answer_text is statements pipe-separated.
-- Dropdown: one row; answer_text is options pipe-separated.
-- Display: static instructional or descriptive text. If the display content has a short
+- Radio Button: single-select answer options displayed; one row per radio group. answer_text is options pipe-separated. Use for visible radio circles/bubbles, or exclusive wording such as "select/choose one", "only one", or Yes/No choice pairs.
+- Checkbox: single checkbox at the question level; no separate option list; answer_text "".
+- Checkbox Group: multi-select answer options displayed; one row per group when multiple options may be selected. answer_text is options or statements pipe-separated. Use for "select all that apply", "one or more", "check all", or similar.
+- Text Area: free text with multiple lines displayed; answer_text can be "" or "[Multi-line text input area]".
+- Text Box: free text with a single line displayed; answer_text can be "" or "[Single-line text input field]".
+- Calendar: allows a single date response to the question; answer_text "" or "[Date input]".
+- Display: static instructional or descriptive text with no answer choices. If the display content has a short
   heading/title followed by a longer paragraph or description, put only the heading/title
   in question_text and put the larger paragraph/description in answer_text. If there is no
   separate body text, keep the display text in question_text and leave answer_text "".
   Treat every visually distinct paragraph as its OWN row, even when adjacent paragraphs
   share the same surrounding heading. Never merge two paragraphs into a single cell; emit
   one row per paragraph (the heading may be repeated across rows).
+- Dropdown: single-select answer options in a select/list control; answer_text is options pipe-separated.
+- Equation: field used to calculate a score or derived value; answer_text describes the visible calculation/formula or "[Calculated score]" if no formula is shown.
+- Number: only allows numeric characters; answer_text "" or "[Numeric input only]".
+- Radio Button with Text Area: single-select answer options with an available free-text area, such as "Other/specify/explain". Keep the options pipe-separated in answer_text and mark the text-entry option as shown, e.g. "Other: [Text area]".
+- Checkbox Group with Text Area: multi-select answer options with an available free-text area, such as "Other/specify/explain". Keep the options pipe-separated in answer_text and mark the text-entry option as shown, e.g. "Other: [Text area]".
+- If a field or instruction continues on the next page, emit a matching continuation row (same question_type and the same or clearly continued question text) so a later merge can combine split options or text. Prefer marking continuation in question_text with "(continued)" or "Continued:" when the layout shows a continuation.
 - Signature: signature line/box; answer_text "[Signature capture area]".
-- Group: section header/container; answer_text "".
-- Group Table: table data-entry block; answer_text describes columns and available empty rows.
 
 Output requirements:
 - Include EVERY input element and instructional/display text in reading order.
+- Page headers/footers: avoid emitting generic repeated noise like page numbers (e.g. "Page 1 of 3"), timestamps, or branding-only lines.
+- Do NOT emit header/footer-only metadata like form identifiers, control numbers, revision/version, or expiry/effective dates.
+- If a header/footer contains completion-critical instructions or legal notices needed to fill/submit the form, include it as a Display row.
 - page_number MUST use absolute page numbers (not 1..N within the batch).
 - source_order starts at 0 for each page and increases top-to-bottom.
 - Preserve bold formatting in question_text by wrapping bold words/phrases in Markdown
