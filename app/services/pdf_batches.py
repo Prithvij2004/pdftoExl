@@ -16,6 +16,26 @@ class PdfBatch:
     pdf_bytes: bytes
 
 
+def split_batch_into_single_pages(batch: PdfBatch) -> list[PdfBatch]:
+    reader = PdfReader(BytesIO(batch.pdf_bytes))
+    out: list[PdfBatch] = []
+    for offset, page in enumerate(reader.pages):
+        writer = PdfWriter()
+        writer.add_page(page)
+        buf = BytesIO()
+        writer.write(buf)
+        absolute_page = batch.start_page_number + offset
+        out.append(
+            PdfBatch(
+                batch_index=batch.batch_index * 1000 + offset,
+                start_page_number=absolute_page,
+                end_page_number=absolute_page,
+                pdf_bytes=buf.getvalue(),
+            )
+        )
+    return out
+
+
 def iter_pdf_page_batches(pdf_path: Path, batch_size: int) -> Iterable[PdfBatch]:
     if batch_size <= 0:
         raise ValueError("batch_size must be >= 1")

@@ -26,5 +26,10 @@ class Settings(BaseSettings):
     uploads_dir: Path = Path("runtime/uploads")
     generated_dir: Path = Path("runtime/generated")
 
+    logfire_token: str | None = None
+    logfire_service_name: str = "pdftoexl"
+    logfire_environment: str = "dev"
+    logfire_send_to_logfire: str = "if-token-present"
+
 
 settings = Settings()

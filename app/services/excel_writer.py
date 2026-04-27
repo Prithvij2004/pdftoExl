@@ -1,14 +1,45 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from openpyxl.styles import Alignment, Font, PatternFill
 
 from app.models import ExtractedRow
 
 
 HEADERS = ["Question Type", "English Question/Index Text", "English Answer Text"]
+
+
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+_BOLD_FONT = InlineFont(b=True)
+
+
+def _to_rich_text(text: str) -> str | CellRichText:
+    """Convert `**bold**` Markdown spans into an openpyxl rich-text cell value.
+
+    Plain text (no bold markers) is returned unchanged so existing behavior is preserved.
+    """
+    if not text or "**" not in text:
+        return text
+
+    parts: list[object] = []
+    last = 0
+    for m in _BOLD_RE.finditer(text):
+        if m.start() > last:
+            parts.append(text[last:m.start()])
+        parts.append(TextBlock(_BOLD_FONT, m.group(1)))
+        last = m.end()
+    if last < len(text):
+        parts.append(text[last:])
+
+    if not any(isinstance(p, TextBlock) for p in parts):
+        return text.replace("**", "")
+
+    return CellRichText(parts)
 
 
 def write_rows_to_xlsx(rows: list[ExtractedRow], out_path: Path) -> Path:
@@ -33,7 +64,7 @@ def write_rows_to_xlsx(rows: list[ExtractedRow], out_path: Path) -> Path:
 
     for i, r in enumerate(rows, start=2):
         ws.cell(row=i, column=1, value=r.question_type.value).alignment = body_alignment
-        ws.cell(row=i, column=2, value=r.question_text).alignment = body_alignment
+        ws.cell(row=i, column=2, value=_to_rich_text(r.question_text)).alignment = body_alignment
         ws.cell(row=i, column=3, value=r.answer_text).alignment = body_alignment
 
     # Column widths

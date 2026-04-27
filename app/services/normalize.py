@@ -35,22 +35,7 @@ def normalize_rows(rows: list[ExtractedRow]) -> list[ExtractedRow]:
 
     cleaned.sort(key=lambda r: (r.page_number, r.source_order))
 
-    # Merge fragmented Display rows (common when paragraphs are split line-by-line)
-    merged: list[ExtractedRow] = []
-    for r in cleaned:
-        if (
-            merged
-            and r.question_type == QuestionType.DISPLAY
-            and merged[-1].question_type == QuestionType.DISPLAY
-            and r.page_number == merged[-1].page_number
-            and r.source_order == merged[-1].source_order + 1
-        ):
-            prev = merged[-1]
-            merged[-1] = prev.model_copy(
-                update={"question_text": _clean_text(prev.question_text + "\n" + r.question_text)}
-            )
-            continue
-        merged.append(r)
+    merged = cleaned
 
     # Deduplicate obvious repeated headers/footers for Display/Group-like rows
     key_counts = Counter(

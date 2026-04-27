@@ -12,14 +12,20 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
+import logfire
+
 from app.config import settings
+from app.observability import configure_logfire
 from app.services.excel_writer import write_rows_to_xlsx
 from app.services.agentic_extractor import extract_rows_from_pdf_agentic
 from app.services.extractor import _ensure_inference_profile_id
 from app.services.normalize import normalize_rows
 
 
+configure_logfire()
+
 app = FastAPI(title="PDF → Excel Extractor", version="0.1.0")
+logfire.instrument_fastapi(app, capture_headers=False)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 PDF_MIME_TYPES = {"application/pdf", "application/x-pdf"}
@@ -62,7 +68,7 @@ def aws_test():
         resp = brt.converse(
             modelId=effective_model_id,
             messages=[{"role": "user", "content": [{"text": "Reply with exactly: OK"}]}],
-            inferenceConfig={"maxTokens": 5, "temperature": 0.0, "topP": 0.1},
+            inferenceConfig={"maxTokens": 5, "temperature": 0.0},
         )
         content = resp.get("output", {}).get("message", {}).get("content", [])
         text = (content[0].get("text") if content and isinstance(content[0], dict) else "") or ""
@@ -155,12 +161,19 @@ def download(file_id: str):
 async def extract(file: UploadFile = File(...)):
     file_id, pdf_path = await _persist_upload_pdf(file)
 
-    try:
-        rows = await extract_rows_from_pdf_agentic(pdf_path)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    with logfire.span(
+        "extract_pdf",
+        file_id=file_id,
+        filename=file.filename,
+        pdf_size_bytes=pdf_path.stat().st_size,
+    ) as span:
+        try:
+            rows = await extract_rows_from_pdf_agentic(pdf_path)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
-    rows = normalize_rows(rows)
+        rows = normalize_rows(rows)
+        span.set_attribute("row_count", len(rows))
     if not rows:
         raise HTTPException(status_code=422, detail="No extractable content found in the PDF.")
 

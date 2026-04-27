@@ -80,7 +80,7 @@ Rules:
 - Do not invent answers; answer_text describes what the respondent is expected to provide.
 - Text Box: single-line blank/underscores; answer_text can be "" or "[Single-line text input field]".
 - Text Area: multi-line blank region; answer_text can be "" or "[Multi-line text input area – adjustable height]".
-- Date: date blank; answer_text "" or "[Date input – mm/dd/yyyy format]".
+- Calendar: date blank; answer_text "" or "[Date input – mm/dd/yyyy format]".
 - Number: numeric blank; answer_text "" or "[Numeric input only]".
 - Radio Button: one row per radio group; answer_text is options pipe-separated.
 - Checkbox: standalone checkbox statement; answer_text "".
@@ -90,6 +90,9 @@ Rules:
   heading/title followed by a longer paragraph or description, put only the heading/title
   in question_text and put the larger paragraph/description in answer_text. If there is no
   separate body text, keep the display text in question_text and leave answer_text "".
+  Treat every visually distinct paragraph as its OWN row, even when adjacent paragraphs
+  share the same surrounding heading. Never merge two paragraphs into a single cell; emit
+  one row per paragraph (the heading may be repeated across rows).
 - Signature: signature line/box; answer_text "[Signature capture area]".
 - Group: section header/container; answer_text "".
 - Group Table: table data-entry block; answer_text describes columns and available empty rows.
@@ -98,6 +101,11 @@ Output requirements:
 - Include EVERY input element and instructional/display text in reading order.
 - page_number MUST use absolute page numbers (not 1..N within the batch).
 - source_order starts at 0 for each page and increases top-to-bottom.
+- Preserve bold formatting in question_text by wrapping bold words/phrases in Markdown
+  `**...**` markers exactly as they appear in the PDF. Do not mark non-bold text as bold.
+  Do not use any other markdown.
+- Each visually distinct paragraph must be its own row. Never concatenate two paragraphs
+  into a single cell even if they share the same surrounding context.
 """.strip()
 
 
@@ -145,7 +153,7 @@ def extract_rows_from_pdf(pdf_path: Path) -> list[ExtractedRow]:
             resp = client.converse(
                 modelId=effective_model_id,
                 messages=messages,
-                inferenceConfig={"maxTokens": 6000, "temperature": 0.1, "topP": 0.1},
+                inferenceConfig={"maxTokens": 6000, "temperature": 0.1},
             )
         except NoCredentialsError as e:
             raise RuntimeError(

@@ -1,22 +1,20 @@
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_ai import Agent, BinaryContent
 from pydantic_ai.models.bedrock import BedrockConverseModel
 from pydantic_ai.providers.bedrock import BedrockProvider
 
 from app.config import settings
-from app.models import ExtractedRow, ExtractionResult, QuestionType
+from app.models import ExtractedRow, QuestionType
 from app.services.extractor import _ensure_inference_profile_id
-from app.services.pdf_batches import PdfBatch, iter_pdf_page_batches
+from app.services.pdf_batches import PdfBatch, iter_pdf_page_batches, split_batch_into_single_pages
 
 
 class FieldCandidate(BaseModel):
@@ -26,20 +24,25 @@ class FieldCandidate(BaseModel):
     page_number: int = Field(ge=1)
     source_order: int = Field(ge=0)
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    rationale: str = Field(default="", description="Brief justification for classification and text choices.")
+    rationale: str = Field(
+        default="",
+        description="Brief justification for the classification (target <=60 chars; longer values are truncated downstream).",
+    )
+
+    @field_validator("rationale", mode="before")
+    @classmethod
+    def _truncate_rationale(cls, v: object) -> str:
+        if v is None:
+            return ""
+        s = str(v).strip()
+        return s[:60]
 
 
 class BatchAnalysis(BaseModel):
     candidates: list[FieldCandidate]
 
 
-@dataclass(frozen=True)
-class _AgentBundle:
-    analysis_agent: Agent
-    finalize_agent: Agent
-
-
-def _bedrock_agent_bundle() -> _AgentBundle:
+def _bedrock_analysis_agent() -> Agent:
     cfg = Config(
         connect_timeout=3600,
         read_timeout=3600,
@@ -51,7 +54,7 @@ def _bedrock_agent_bundle() -> _AgentBundle:
     effective_model_id = _ensure_inference_profile_id(settings.bedrock_model_id, settings.aws_region)
     model = BedrockConverseModel(model_name=effective_model_id, provider=provider)
 
-    analysis_agent = Agent(
+    return Agent(
         model=model,
         output_type=BatchAnalysis,
         retries=2,
@@ -62,22 +65,8 @@ def _bedrock_agent_bundle() -> _AgentBundle:
             "Translate non-English to English.\n"
             "Return data in the required structured output schema."
         ),
-        model_settings={"temperature": 0.2, "top_p": 0.1, "max_tokens": 4000},
+        model_settings={"temperature": 0.2, "max_tokens": 6000},
     )
-
-    finalize_agent = Agent(
-        model=model,
-        output_type=ExtractionResult,
-        retries=2,
-        system_prompt=(
-            "You are producing the FINAL extraction rows that will be written to Excel.\n"
-            "Output must conform exactly to the schema.\n"
-            "Do not include reasoning text in the final fields; reasoning may be added only in row.meta."
-        ),
-        model_settings={"temperature": 0.1, "top_p": 0.1, "max_tokens": 6000},
-    )
-
-    return _AgentBundle(analysis_agent=analysis_agent, finalize_agent=finalize_agent)
 
 
 def _analysis_prompt(batch: PdfBatch) -> list[object]:
@@ -101,32 +90,12 @@ def _analysis_prompt(batch: PdfBatch) -> list[object]:
             "- Use Group Table for repeated row/column data-entry regions and Group for section headers/containers.\n"
             "- question_text should be the label/question/instruction in English.\n"
             "- answer_text describes what the user is expected to provide; options should be pipe-separated.\n"
-            "- For Display rows with a short heading/title and a larger paragraph or description, use the heading/title as question_text and the larger paragraph/description as answer_text. If there is no separate body text, keep answer_text empty.\n"
-            "- page_number must be the absolute page number in the original PDF.\n"
-            "- source_order starts at 0 for each page and increases top-to-bottom.\n"
-            "- rationale must be brief and specific, and should mention the semantic clue used to choose the field type.\n"
-        ),
-        BinaryContent(data=batch.pdf_bytes, media_type="application/pdf"),
-    ]
-
-
-def _finalize_prompt(batch: PdfBatch, analysis: BatchAnalysis) -> list[object]:
-    payload = analysis.model_dump(mode="json")
-    return [
-        (
-            "Convert the analyzed candidates into the FINAL rows for Excel.\n"
-            f"Pages in original PDF: {batch.start_page_number}..{batch.end_page_number}.\n\n"
-            "Constraints:\n"
-            "- Output ONLY rows (no extra commentary).\n"
-            "- question_type must be exactly one of the allowed values.\n"
-            "- Preserve the best semantic type from the analysis. Do not change fields to Text Box just because they look like blanks.\n"
-            "- Re-check Date, Number, Signature, Text Area, option groups, tables, and section/display rows using the PDF context before finalizing.\n"
-            "- question_text must be non-empty English.\n"
-            "- For Display rows, preserve a heading-plus-description split when present: heading/title in question_text, larger paragraph/description in answer_text.\n"
-            "- Keep ordering stable by (page_number, source_order).\n"
-            "- Store rationale in row.meta.rationale if helpful.\n\n"
-            "Analyzed candidates JSON:\n"
-            + json.dumps(payload, ensure_ascii=False)
+            "- Treat every visually distinct paragraph as its OWN candidate row, even when adjacent paragraphs share the same surrounding heading or context. Never merge two paragraphs into a single question_text or answer_text.\n"
+            "- For Display rows with a short heading/title and a larger paragraph or description, use the heading/title as question_text and the larger paragraph/description as answer_text. If there is no separate body text, keep answer_text empty. If there are multiple body paragraphs under one heading, emit one Display row per paragraph (heading may be repeated).\n"
+            "- Preserve bold formatting in question_text using Markdown bold markers `**...**` around any words/phrases that are visibly bold in the PDF. Do not bold text that is not actually bold. Do not use any other markdown.\n"
+            "- This batch contains exactly ONE page; set page_number to that page number for every candidate.\n"
+            "- source_order starts at 0 and increases strictly top-to-bottom in reading order.\n"
+            "- rationale must be at most 60 characters; name the single semantic clue used to choose the field type.\n"
         ),
         BinaryContent(data=batch.pdf_bytes, media_type="application/pdf"),
     ]
@@ -149,44 +118,60 @@ def _candidates_to_rows(analysis: BatchAnalysis) -> list[ExtractedRow]:
     return rows
 
 
+def _is_truncated_tooluse_error(err: BaseException) -> bool:
+    """Detect Nova's 424 ModelErrorException for malformed/truncated tool-use output."""
+    msg = str(err)
+    return (
+        "ModelErrorException" in msg
+        or "invalid sequence as part of ToolUse" in msg
+        or "status_code: 424" in msg
+    )
+
+
+def _renumber_rows(rows: list[ExtractedRow], page_number: int) -> list[ExtractedRow]:
+    """Override model-provided page_number/source_order with deterministic values.
+
+    Why: the model is unreliable at assigning correct page_number across multi-page
+    batches and at resetting source_order per page. Since each batch here is a single
+    page, we authoritatively set page_number from the batch and renumber source_order
+    from the returned reading order.
+    """
+    out: list[ExtractedRow] = []
+    for idx, r in enumerate(rows):
+        out.append(r.model_copy(update={"page_number": page_number, "source_order": idx}))
+    return out
+
+
+async def _process_batch(agent: Agent, batch: PdfBatch) -> list[ExtractedRow]:
+    try:
+        analysis = (await agent.run(_analysis_prompt(batch))).output
+    except NoCredentialsError as e:
+        raise RuntimeError(
+            "Bedrock invoke failed: AWS credentials not found. "
+            "Configure credentials (e.g., `aws configure` or env vars) and ensure Bedrock access."
+        ) from e
+    except (ClientError, BotoCoreError) as e:
+        raise RuntimeError(
+            "Bedrock invoke failed during analysis. If you see an on-demand throughput error, "
+            "set BEDROCK_MODEL_ID to an inference profile ID like "
+            "`us.amazon.nova-pro-v1:0` (or `eu.amazon.nova-pro-v1:0`). "
+            f"Underlying error: {e}"
+        ) from e
+
+    return _candidates_to_rows(analysis)
+
+
 async def extract_rows_from_pdf_agentic(pdf_path: Path) -> list[ExtractedRow]:
-    bundle = _bedrock_agent_bundle()
+    agent = _bedrock_analysis_agent()
     all_rows: list[ExtractedRow] = []
 
+    # Process one page at a time. The model is unreliable at attributing candidates
+    # to the correct page within a multi-page batch and at resetting source_order
+    # per page, which produced shuffled / mis-paged rows across consecutive runs.
     for batch in iter_pdf_page_batches(pdf_path, settings.pdf_batch_size):
-        try:
-            analysis = (await bundle.analysis_agent.run(_analysis_prompt(batch))).output
-        except NoCredentialsError as e:
-            raise RuntimeError(
-                "Bedrock invoke failed: AWS credentials not found. "
-                "Configure credentials (e.g., `aws configure` or env vars) and ensure Bedrock access."
-            ) from e
-        except (ClientError, BotoCoreError) as e:
-            raise RuntimeError(
-                "Bedrock invoke failed during analysis. If you see an on-demand throughput error, "
-                "set BEDROCK_MODEL_ID to an inference profile ID like "
-                "`us.amazon.nova-pro-v1:0` (or `eu.amazon.nova-pro-v1:0`). "
-                f"Underlying error: {e}"
-            ) from e
-
-        try:
-            final_rows = (await bundle.finalize_agent.run(_finalize_prompt(batch, analysis))).output.rows
-        except NoCredentialsError as e:
-            raise RuntimeError(
-                "Bedrock invoke failed: AWS credentials not found. "
-                "Configure credentials (e.g., `aws configure` or env vars) and ensure Bedrock access."
-            ) from e
-        except (ClientError, BotoCoreError) as e:
-            raise RuntimeError(
-                "Bedrock invoke failed during finalize. If you see an on-demand throughput error, "
-                "set BEDROCK_MODEL_ID to an inference profile ID like "
-                "`us.amazon.nova-pro-v1:0` (or `eu.amazon.nova-pro-v1:0`). "
-                f"Underlying error: {e}"
-            ) from e
-        except Exception:
-            final_rows = _candidates_to_rows(analysis)
-
-        all_rows.extend(final_rows)
+        for sub in split_batch_into_single_pages(batch):
+            rows = await _process_batch(agent, sub)
+            all_rows.extend(_renumber_rows(rows, sub.start_page_number))
 
     return all_rows
 
