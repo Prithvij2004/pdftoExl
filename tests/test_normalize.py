@@ -21,7 +21,7 @@ def _row(
     )
 
 
-def test_repeated_page_header_display_is_kept_once_and_prefixed() -> None:
+def test_repeated_page_header_display_is_kept_once() -> None:
     rows = [
         _row(qt=QuestionType.DISPLAY, q="Form ABC", page=1, order=0),
         _row(qt=QuestionType.TEXT_BOX, q="Name", page=1, order=5),
@@ -33,10 +33,10 @@ def test_repeated_page_header_display_is_kept_once_and_prefixed() -> None:
 
     out = normalize_rows(rows)
 
-    # Header appears once and is marked.
+    # Header appears once.
     headers = [r for r in out if "Form ABC" in r.question_text]
     assert len(headers) == 1
-    assert headers[0].question_text.lower().startswith("(header)")
+    assert headers[0].question_text == "Form ABC"
 
     # Page-number footers are dropped.
     assert not any("page 1 of 2" in r.question_text.lower() for r in out)
@@ -46,7 +46,7 @@ def test_repeated_page_header_display_is_kept_once_and_prefixed() -> None:
     assert [r.question_text for r in out if r.question_type == QuestionType.TEXT_BOX] == ["Name", "Name"]
 
 
-def test_repeated_header_fillable_field_is_kept_once_and_prefixed() -> None:
+def test_repeated_header_fillable_field_is_kept_once() -> None:
     rows = [
         _row(qt=QuestionType.TEXT_BOX, q="Case Number", page=1, order=0),
         _row(qt=QuestionType.TEXT_AREA, q="Describe incident", page=1, order=5),
@@ -60,7 +60,7 @@ def test_repeated_header_fillable_field_is_kept_once_and_prefixed() -> None:
 
     case = [r for r in out if "Case Number" in r.question_text]
     assert len(case) == 1
-    assert case[0].question_text.lower().startswith("(header)")
+    assert case[0].question_text == "Case Number"
 
     # Header/footer-only IDs/dates (like OMB/control/form metadata) are dropped.
     assert not any("omb" in r.question_text.lower() for r in out)
@@ -98,61 +98,6 @@ def test_non_repeated_footer_is_removed_if_not_valuable() -> None:
     out = normalize_rows(rows)
     assert "www.example.com" not in [r.question_text for r in out]
     assert "Name" in [r.question_text for r in out]
-
-
-def test_merge_split_radio_options_across_pages() -> None:
-    rows = [
-        _row(
-            qt=QuestionType.RADIO_BUTTON,
-            q="What is your status?",
-            a="A | B | C",
-            page=1,
-            order=0,
-        ),
-        _row(
-            qt=QuestionType.RADIO_BUTTON,
-            q="What is your status?",
-            a="D | E",
-            page=2,
-            order=0,
-        ),
-    ]
-    out = normalize_rows(rows)
-    assert len(out) == 1
-    assert out[0].question_type == QuestionType.RADIO_BUTTON
-    assert set(p.strip() for p in out[0].answer_text.split("|")) == {
-        "A",
-        "B",
-        "C",
-        "D",
-        "E",
-    }
-    assert out[0].page_number == 1
-    assert 2 in (out[0].meta or {}).get("continuation_from_pages", [])
-
-
-def test_merge_text_area_with_continued_marker_on_next_page() -> None:
-    rows = [
-        _row(
-            qt=QuestionType.TEXT_AREA,
-            q="Explain your history",
-            a="Line one.",
-            page=1,
-            order=0,
-        ),
-        _row(
-            qt=QuestionType.TEXT_AREA,
-            q="(continued)",
-            a="Line two.",
-            page=2,
-            order=0,
-        ),
-    ]
-    out = normalize_rows(rows)
-    assert len(out) == 1
-    assert "Line one." in out[0].answer_text
-    assert "Line two." in out[0].answer_text
-    assert out[0].page_number == 1
 
 
 def test_does_not_merge_repeated_name_across_pages() -> None:

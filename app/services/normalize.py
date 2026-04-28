@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from copy import deepcopy
-from typing import Any
 
 from app.models import ExtractedRow, QuestionType
 
 
 _WS_RE = re.compile(r"[ \t]+")
-_HEADER_PREFIX = "(header) "
 
 _PAGE_RE = re.compile(r"^\s*page\s+\d+(\s*(/|of)\s*\d+)?\s*$", re.IGNORECASE)
 _URL_ONLY_RE = re.compile(r"^\s*(https?://\S+|www\.\S+)\s*$", re.IGNORECASE)
@@ -21,30 +18,6 @@ _MONTH_NAME_RE = re.compile(
     r"\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|"
     r"sep|sept|september|oct|october|nov|november|dec|december)\b",
     re.IGNORECASE,
-)
-
-# Do not auto-merge these short, commonly repeated field labels (unless the continuation
-# is explicitly marked, e.g. "(continued)").
-_STANDALONE_FIELD_LABELS = frozenset(
-    {
-        "name",
-        "first name",
-        "last name",
-        "middle name",
-        "date",
-        "dob",
-        "signature",
-        "address",
-        "phone",
-        "email",
-        "e-mail",
-        "ssn",
-        "zip",
-        "zip code",
-        "city",
-        "state",
-        "id number",
-    }
 )
 
 # Strong signals to choose one answer (mutually exclusive) vs many (checkboxes).
@@ -72,22 +45,6 @@ _YN_PROMPT_RE = re.compile(
     re.IGNORECASE,
 )
 
-_CONTINUED_Q_RE = re.compile(
-    r"^\s*("
-    r"\(continued\)|<continued>|\[continued\]|"
-    r"continued\s*[:.]\s*|"  # "Continued:" body on next line or same
-    r"cont\.?\s*[:.]\s*|"  # "Cont.:" 
-    r"continuation(\s+of|)\s*[:.]?\s*"
-    r")",
-    re.IGNORECASE,
-)
-
-# Whole-line "continued" with no other meaningful title
-_CONTINUED_STANDALONE_RE = re.compile(
-    r"^\s*(\(continued\)|continued|cont\.?|continuation|…|\.\.\.)\s*$",
-    re.IGNORECASE,
-)
-
 
 def _clean_text(s: str) -> str:
     s = (s or "").replace("\u00a0", " ")
@@ -101,161 +58,11 @@ def _norm_key(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip().lower())
 
 
-def _is_blocked_merge_label(q: str) -> bool:
-    t = _norm_key(q)
-    if not t:
-        return True
-    if t in _STANDALONE_FIELD_LABELS:
-        return True
-    if len(t) <= 2:
-        return True
-    return False
-
-
-def _is_explicit_continued_question(q: str) -> bool:
-    t = (q or "").strip()
-    if not t:
-        return False
-    if _CONTINUED_STANDALONE_RE.match(t):
-        return True
-    if _CONTINUED_Q_RE.match(t):
-        return True
-    return "continued" in t.lower() and len(t) < 80
-
-
 def _split_pipe_options(s: str) -> list[str]:
     s = (s or "").strip()
     if not s or "|" not in s:
         return []
     return [p.strip() for p in s.split("|") if p.strip()]
-
-
-def _merge_pipe_options(a: str, b: str) -> str:
-    seen: set[str] = set()
-    out: list[str] = []
-    for part in _split_pipe_options(a) + _split_pipe_options(b):
-        k = part.lower()
-        if k and k not in seen:
-            seen.add(k)
-            out.append(part)
-    return " | ".join(out)
-
-
-def _append_with_sep(a: str, b: str, sep: str = "\n\n") -> str:
-    a = (a or "").strip()
-    b = (b or "").strip()
-    if not b:
-        return a
-    if not a:
-        return b
-    return f"{a}{sep}{b}"
-
-
-def _meta_add_continued_from(meta: dict[str, Any], from_page: int) -> dict[str, Any]:
-    m = deepcopy(meta) if meta else {}
-    pages: list[int] = list(m.get("continuation_from_pages", []))  # type: ignore[assignment]
-    if from_page not in pages:
-        pages.append(from_page)
-    m["continuation_from_pages"] = sorted(pages)
-    return m
-
-
-def _merge_option_rows(anchor: ExtractedRow, cont: ExtractedRow) -> ExtractedRow:
-    merged_ans = _merge_pipe_options(anchor.answer_text, cont.answer_text)
-    if not _split_pipe_options(merged_ans) and (anchor.answer_text or cont.answer_text):
-        # Fallback: non-pipe; concatenate
-        merged_ans = _append_with_sep(anchor.answer_text, cont.answer_text, " | ")
-    return anchor.model_copy(
-        update={
-            "answer_text": merged_ans,
-            "meta": _meta_add_continued_from(anchor.meta, cont.page_number),
-        }
-    )
-
-
-def _merge_textual_continuation(anchor: ExtractedRow, cont: ExtractedRow) -> ExtractedRow:
-    new_q = anchor.question_text
-    # If the continuation had a "Continued: ..." title, keep body in answer
-    c_q = (cont.question_text or "").strip()
-    body_from_q = ""
-    m = _CONTINUED_Q_RE.match(c_q)
-    if m and len(c_q) > m.end():
-        body_from_q = c_q[m.end() :].strip()
-    new_a = _append_with_sep(anchor.answer_text, cont.answer_text)
-    if body_from_q:
-        new_a = _append_with_sep(new_a, body_from_q)
-    return anchor.model_copy(
-        update={
-            "question_text": new_q,
-            "answer_text": new_a,
-            "meta": _meta_add_continued_from(anchor.meta, cont.page_number),
-        }
-    )
-
-
-def _can_merge_option_group(anchor: ExtractedRow, cont: ExtractedRow) -> bool:
-    if anchor.question_type not in (
-        QuestionType.RADIO_BUTTON,
-        QuestionType.CHECKBOX_GROUP,
-        QuestionType.RADIO_BUTTON_WITH_TEXT_AREA,
-        QuestionType.CHECKBOX_GROUP_WITH_TEXT_AREA,
-    ):
-        return False
-    if cont.question_type != anchor.question_type:
-        return False
-    if _norm_key(anchor.question_text) != _norm_key(cont.question_text):
-        return False
-    if cont.page_number <= anchor.page_number:
-        return False
-    if not (_split_pipe_options(anchor.answer_text) or _split_pipe_options(cont.answer_text)):
-        return False
-    if _is_blocked_merge_label(anchor.question_text) and not _is_explicit_continued_question(
-        cont.question_text
-    ):
-        return False
-    return True
-
-
-def _can_merge_textual_block(anchor: ExtractedRow, cont: ExtractedRow) -> bool:
-    if not _is_explicit_continued_question(cont.question_text):
-        return False
-    if cont.page_number <= anchor.page_number:
-        return False
-    if anchor.question_type not in (
-        QuestionType.TEXT_AREA,
-        QuestionType.DISPLAY,
-    ):
-        return False
-    if cont.question_type not in (anchor.question_type, QuestionType.DISPLAY, QuestionType.TEXT_AREA):
-        return False
-    if _is_blocked_merge_label(anchor.question_text) and not _is_explicit_continued_question(
-        cont.question_text
-    ):
-        return False
-    # If continuation has a full duplicate heading + body, only merge as continuation
-    if _norm_key(anchor.question_text) == _norm_key(cont.question_text) and not _CONTINUED_STANDALONE_RE.match(
-        (cont.question_text or "").strip()
-    ):
-        # Same heading on next page could be a repeated section, not a continuation
-        if not _CONTINUED_Q_RE.match((cont.question_text or "").strip()):
-            return False
-    return True
-
-
-def _can_merge_pair(anchor: ExtractedRow, cont: ExtractedRow) -> bool:
-    if _can_merge_option_group(anchor, cont):
-        return True
-    if _can_merge_textual_block(anchor, cont):
-        return True
-    return False
-
-
-def _do_merge(anchor: ExtractedRow, cont: ExtractedRow) -> ExtractedRow:
-    if _can_merge_option_group(anchor, cont):
-        return _merge_option_rows(anchor, cont)
-    if _can_merge_textual_block(anchor, cont):
-        return _merge_textual_continuation(anchor, cont)
-    return anchor
 
 
 def _apply_choice_type_rules(r: ExtractedRow) -> ExtractedRow:
@@ -292,19 +99,78 @@ def _apply_choice_type_rules(r: ExtractedRow) -> ExtractedRow:
     return r.model_copy(update={"question_type": new_qt})
 
 
-def _merge_continuation_rows(rows: list[ExtractedRow]) -> list[ExtractedRow]:
-    if len(rows) < 2:
-        return list(rows)
+_PARENT_QUESTION_TYPES = {
+    QuestionType.RADIO_BUTTON,
+    QuestionType.CHECKBOX_GROUP,
+    QuestionType.DROPDOWN,
+    QuestionType.RADIO_BUTTON_WITH_TEXT_AREA,
+    QuestionType.CHECKBOX_GROUP_WITH_TEXT_AREA,
+    QuestionType.CHECKBOX,
+}
+
+_CHECKBOX_PARENT_TYPES = {
+    QuestionType.CHECKBOX,
+    QuestionType.CHECKBOX_GROUP,
+    QuestionType.CHECKBOX_GROUP_WITH_TEXT_AREA,
+}
+
+
+def _rewrite_for_checkbox_parent(bl: str, parent_seq: int) -> str:
+    """For checkbox-based parents, the value side is replaced with 'checked(selected)'.
+
+    Preserve the original prefix verb ('Display if', 'If', 'Skip to', etc.) when reasonable;
+    default to 'If' when the agent didn't supply one.
+    """
+    parts = bl.split("=", 1)
+    prefix = parts[0].strip() if len(parts) == 2 else ""
+    if not prefix or "Q?" not in prefix:
+        prefix = f"If Q{parent_seq}"
+    else:
+        prefix = prefix.replace("Q?", f"Q{parent_seq}")
+    return f"{prefix} = checked(selected)"
+
+
+def _resolve_branching_logic(rows: list[ExtractedRow]) -> list[ExtractedRow]:
+    """Replace the literal 'Q?' placeholder in branching_logic with the parent's sequence number.
+
+    The parent of a row is the most recent preceding row whose type can host a branching
+    condition (option-bearing or single checkbox). For checkbox-based parents, the value
+    side of the condition is rewritten to 'checked(selected)'.
+
+    Requires sequence numbers to be assigned beforehand.
+    """
     out: list[ExtractedRow] = []
-    for r in rows:
-        merged = False
-        for k in range(len(out)):
-            if _can_merge_pair(out[k], r):
-                out[k] = _do_merge(out[k], r)
-                merged = True
-                break
-        if not merged:
+    for i, r in enumerate(rows):
+        bl = (r.branching_logic or "").strip()
+        if not bl or "Q?" not in bl:
             out.append(r)
+            continue
+
+        parent: ExtractedRow | None = None
+        for j in range(i - 1, -1, -1):
+            prev = rows[j]
+            if prev.question_type in _PARENT_QUESTION_TYPES:
+                parent = prev
+                break
+
+        if parent is None or parent.sequence <= 0:
+            out.append(r.model_copy(update={"branching_logic": ""}))
+            continue
+
+        if parent.question_type in _CHECKBOX_PARENT_TYPES:
+            new_bl = _rewrite_for_checkbox_parent(bl, parent.sequence)
+        else:
+            new_bl = bl.replace("Q?", f"Q{parent.sequence}")
+
+        out.append(r.model_copy(update={"branching_logic": new_bl}))
+    return out
+
+
+def assign_sequence(rows: list[ExtractedRow]) -> list[ExtractedRow]:
+    """Assign 1-based global reading-order sequence numbers across all rows."""
+    out: list[ExtractedRow] = []
+    for i, r in enumerate(rows, start=1):
+        out.append(r.model_copy(update={"sequence": i}))
     return out
 
 
@@ -325,9 +191,8 @@ def normalize_rows(rows: list[ExtractedRow]) -> list[ExtractedRow]:
         )
 
     cleaned.sort(key=lambda r: (r.page_number, r.source_order))
-    # Continuation and choice-type rules (deterministic, before header/footer heuristics)
-    merged: list[ExtractedRow] = _merge_continuation_rows(cleaned)
-    merged = [_apply_choice_type_rules(r) for r in merged]
+    # Choice-type rules (deterministic, before header/footer heuristics)
+    merged: list[ExtractedRow] = [_apply_choice_type_rules(r) for r in cleaned]
 
     # Compute per-page bounds so header/footer detection works for small pages too.
     page_max_order: dict[int, int] = {}
@@ -350,12 +215,6 @@ def normalize_rows(rows: list[ExtractedRow]) -> list[ExtractedRow]:
     def row_key(r: ExtractedRow) -> tuple[QuestionType, str, str]:
         # Include answer_text to avoid collapsing distinct Display paragraphs that share the same heading.
         return (r.question_type, r.question_text, r.answer_text)
-
-    def with_header_prefix(r: ExtractedRow) -> ExtractedRow:
-        qt = r.question_text or ""
-        if qt.lower().startswith(_HEADER_PREFIX.strip().lower()):
-            return r
-        return r.model_copy(update={"question_text": f"{_HEADER_PREFIX}{qt}"})
 
     def is_generic_footer_noise(text: str) -> bool:
         t = (text or "").strip()
@@ -414,40 +273,20 @@ def normalize_rows(rows: list[ExtractedRow]) -> list[ExtractedRow]:
 
         return False
 
-    def is_valuable_footer_row(r: ExtractedRow) -> bool:
-        # Conservative policy (with explicit exclusion): keep completion guidance and legal notices,
-        # but do NOT keep ID/date metadata like OMB/form numbers, revisions, or expirations.
+    def is_droppable_footer_row(r: ExtractedRow) -> bool:
+        # Drop only rows that look like true page-footer noise or ID/date metadata.
+        # Real form content at the bottom of a page (signature blocks, dates, etc.) must be kept.
         blob = " ".join([r.question_text or "", r.answer_text or ""]).strip()
         if not blob:
-            return False
-        b = blob.lower()
-
-        if is_generic_footer_noise(blob):
-            return False
-
-        if is_header_footer_id_or_date_metadata(blob):
-            return False
-
-        keywords = (
-            "privacy act",
-            "paperwork reduction act",
-            "notice",
-            "instructions",
-            "submit",
-            "return",
-            "mail",
-            "fax",
-            "email",
-            "retain",
-            "keep a copy",
-        )
-        if any(k in b for k in keywords):
             return True
-
+        if is_generic_footer_noise(blob):
+            return True
+        if is_header_footer_id_or_date_metadata(blob):
+            return True
         return False
 
     # Repeated header detection: if identical rows appear in the header region on >=2 pages,
-    # keep only the first occurrence, and mark it in the question_text.
+    # keep only the first occurrence.
     header_key_counts = Counter(row_key(r) for r in merged if r.question_text and is_header_region(r))
     footer_key_counts = Counter(row_key(r) for r in merged if r.question_text and is_footer_region(r))
 
@@ -467,17 +306,17 @@ def normalize_rows(rows: list[ExtractedRow]) -> list[ExtractedRow]:
         ):
             continue
 
-        # Header: show only once (first occurrence), prefix `(header)` on the kept one.
+        # Header: show only once (first occurrence).
         if is_header_region(r) and header_key_counts.get(k, 0) >= 2:
             if k in kept_header:
                 continue
             kept_header.add(k)
-            out.append(with_header_prefix(r))
+            out.append(r)
             continue
 
-        # Footer: keep only if valuable; for repeated valuable footers, show only once.
+        # Footer: drop only true page-footer noise/metadata; for repeated footers, show only once.
         if is_footer_region(r):
-            if not is_valuable_footer_row(r):
+            if is_droppable_footer_row(r):
                 continue
             if footer_key_counts.get(k, 0) >= 2:
                 if k in kept_footer:
@@ -489,3 +328,12 @@ def normalize_rows(rows: list[ExtractedRow]) -> list[ExtractedRow]:
         out.append(r)
 
     return out
+
+
+def resolve_branching_logic(rows: list[ExtractedRow]) -> list[ExtractedRow]:
+    """Public entry point: resolve 'Q?' placeholders to parent question numbers.
+
+    Run AFTER any row-dropping passes (e.g. semantic pass), so question numbering
+    matches the final output order.
+    """
+    return _resolve_branching_logic(rows)

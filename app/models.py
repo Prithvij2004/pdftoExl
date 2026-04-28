@@ -27,6 +27,8 @@ class ExtractedRow(BaseModel):
     question_type: QuestionType
     question_text: str = Field(min_length=1)
     answer_text: str = ""
+    branching_logic: str = ""
+    sequence: int = Field(default=0, ge=0)
 
     page_number: int = Field(ge=1)
     source_order: int = Field(ge=0)

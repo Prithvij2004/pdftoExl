@@ -19,7 +19,8 @@ from app.observability import configure_logfire
 from app.services.excel_writer import write_rows_to_xlsx
 from app.services.agentic_extractor import extract_rows_from_pdf_agentic
 from app.services.extractor import _ensure_inference_profile_id
-from app.services.normalize import normalize_rows
+from app.services.normalize import assign_sequence, normalize_rows, resolve_branching_logic
+from app.services.semantic_pass_agent import llm_semantic_pass
 
 
 configure_logfire()
@@ -173,6 +174,10 @@ async def extract(file: UploadFile = File(...)):
             raise HTTPException(status_code=500, detail=str(e)) from e
 
         rows = normalize_rows(rows)
+        span.set_attribute("row_count_after_normalize", len(rows))
+        rows = await llm_semantic_pass(rows)
+        rows = assign_sequence(rows)
+        rows = resolve_branching_logic(rows)
         span.set_attribute("row_count", len(rows))
     if not rows:
         raise HTTPException(status_code=422, detail="No extractable content found in the PDF.")
@@ -184,9 +189,11 @@ async def extract(file: UploadFile = File(...)):
         debug_path = settings.generated_dir / f"{file_id}.json"
         debug_payload = [
             {
+                "sequence": r.sequence,
                 "question_type": r.question_type.value,
                 "question_text": r.question_text,
                 "answer_text": r.answer_text,
+                "branching_logic": r.branching_logic,
                 "page_number": r.page_number,
                 "source_order": r.source_order,
                 "confidence": r.confidence,
