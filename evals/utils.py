@@ -27,7 +27,14 @@ DEFAULT_CASES = [
     ),
 ]
 
-EXPECTED_HEADERS = ("Question Type", "English Question/Index Text", "English Answer Text")
+EXPECTED_HEADERS = (
+    "Sequence",
+    "Section",
+    "Question Type",
+    "English Question/Index Text",
+    "English Answer Text",
+)
+CORE_HEADERS = ("Question Type", "English Question/Index Text", "English Answer Text")
 
 _WS_RE = re.compile(r"[ \t]+")
 
@@ -67,21 +74,22 @@ def iter_eval_cases(
     return out
 
 
-def load_xlsx_rows_from_path(xlsx_path: Path) -> tuple[tuple[str, str, str], list[tuple[str, str, str]]]:
+def _core_column_indices(header_values: list[str]) -> tuple[int, int, int]:
+    return tuple(header_values.index(name) + 1 for name in CORE_HEADERS)  # type: ignore[return-value]
+
+
+def load_xlsx_rows_from_path(xlsx_path: Path) -> tuple[tuple[str, ...], list[tuple[str, str, str]]]:
     wb = load_workbook(filename=str(xlsx_path), read_only=True, data_only=True)
     ws = wb.active
 
-    header = (
-        _clean_cell_text(ws.cell(row=1, column=1).value),
-        _clean_cell_text(ws.cell(row=1, column=2).value),
-        _clean_cell_text(ws.cell(row=1, column=3).value),
-    )
+    header = tuple(_clean_cell_text(ws.cell(row=1, column=c).value) for c in range(1, ws.max_column + 1))
+    qt_col, q_col, a_col = _core_column_indices(list(header))
 
     rows: list[tuple[str, str, str]] = []
     for r in range(2, ws.max_row + 1):
-        qt = _clean_cell_text(ws.cell(row=r, column=1).value)
-        q = _clean_cell_text(ws.cell(row=r, column=2).value)
-        a = _clean_cell_text(ws.cell(row=r, column=3).value)
+        qt = _clean_cell_text(ws.cell(row=r, column=qt_col).value)
+        q = _clean_cell_text(ws.cell(row=r, column=q_col).value)
+        a = _clean_cell_text(ws.cell(row=r, column=a_col).value)
         if not (qt or q or a):
             continue
         if not q:
@@ -91,19 +99,16 @@ def load_xlsx_rows_from_path(xlsx_path: Path) -> tuple[tuple[str, str, str], lis
     return header, rows
 
 
-def load_xlsx_rows_from_bytes(xlsx_bytes: bytes) -> tuple[tuple[str, str, str], list[tuple[str, str, str]]]:
+def load_xlsx_rows_from_bytes(xlsx_bytes: bytes) -> tuple[tuple[str, ...], list[tuple[str, str, str]]]:
     wb = load_workbook(filename=BytesIO(xlsx_bytes), read_only=True, data_only=True)
     ws = wb.active
-    header = (
-        _clean_cell_text(ws.cell(row=1, column=1).value),
-        _clean_cell_text(ws.cell(row=1, column=2).value),
-        _clean_cell_text(ws.cell(row=1, column=3).value),
-    )
+    header = tuple(_clean_cell_text(ws.cell(row=1, column=c).value) for c in range(1, ws.max_column + 1))
+    qt_col, q_col, a_col = _core_column_indices(list(header))
     rows: list[tuple[str, str, str]] = []
     for r in range(2, ws.max_row + 1):
-        qt = _clean_cell_text(ws.cell(row=r, column=1).value)
-        q = _clean_cell_text(ws.cell(row=r, column=2).value)
-        a = _clean_cell_text(ws.cell(row=r, column=3).value)
+        qt = _clean_cell_text(ws.cell(row=r, column=qt_col).value)
+        q = _clean_cell_text(ws.cell(row=r, column=q_col).value)
+        a = _clean_cell_text(ws.cell(row=r, column=a_col).value)
         if not (qt or q or a):
             continue
         if not q:
@@ -128,7 +133,7 @@ def load_golden_rows_from_path(
     Loads the *expected* rows from a golden workbook.
 
     Supports two golden formats:
-    - A simple 3-column Extracted sheet (the same format the API returns).
+    - A simple Extracted sheet (the same format the API returns).
     - A template-style sheet that includes columns named:
         Question Type, English Question/Index Text, English Answer Text
       in some header row; this function finds that row and extracts those columns.
@@ -138,17 +143,14 @@ def load_golden_rows_from_path(
     # 1) If any sheet is already in the 3-column format, use it.
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        header = (
-            _clean_cell_text(ws.cell(row=1, column=1).value),
-            _clean_cell_text(ws.cell(row=1, column=2).value),
-            _clean_cell_text(ws.cell(row=1, column=3).value),
-        )
-        if header == EXPECTED_HEADERS:
+        header = [_clean_cell_text(ws.cell(row=1, column=c).value) for c in range(1, min(ws.max_column, max_cols) + 1)]
+        if all(name in header for name in CORE_HEADERS):
+            qt_col, q_col, a_col = _core_column_indices(header)
             rows: list[tuple[str, str, str]] = []
             for r in range(2, min(ws.max_row, max_rows) + 1):
-                qt = _clean_cell_text(ws.cell(row=r, column=1).value)
-                q = _clean_cell_text(ws.cell(row=r, column=2).value)
-                a = _clean_cell_text(ws.cell(row=r, column=3).value)
+                qt = _clean_cell_text(ws.cell(row=r, column=qt_col).value)
+                q = _clean_cell_text(ws.cell(row=r, column=q_col).value)
+                a = _clean_cell_text(ws.cell(row=r, column=a_col).value)
                 if not (qt or q or a):
                     continue
                 if not q:
@@ -158,7 +160,7 @@ def load_golden_rows_from_path(
             return rows
 
     # 2) Otherwise, find a header row in any sheet with the required column names.
-    header_targets = EXPECTED_HEADERS
+    header_targets = CORE_HEADERS
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
         for r_idx, row in enumerate(
@@ -192,7 +194,7 @@ def load_golden_rows_from_path(
 
     wb.close()
     raise UnsupportedGoldenWorkbook(
-        f"{xlsx_path} does not contain a usable golden row table with columns: {EXPECTED_HEADERS}"
+        f"{xlsx_path} does not contain a usable golden row table with columns: {CORE_HEADERS}"
     )
 
 

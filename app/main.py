@@ -20,6 +20,7 @@ from app.services.excel_writer import write_rows_to_xlsx
 from app.services.agentic_extractor import extract_rows_from_pdf_agentic
 from app.services.extractor import _ensure_inference_profile_id
 from app.services.normalize import normalize_rows
+from app.services.section_refiner import refine_sections_with_ai
 
 
 configure_logfire()
@@ -173,6 +174,10 @@ async def extract(file: UploadFile = File(...)):
             raise HTTPException(status_code=500, detail=str(e)) from e
 
         rows = normalize_rows(rows)
+        try:
+            rows = await refine_sections_with_ai(rows)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
         span.set_attribute("row_count", len(rows))
     if not rows:
         raise HTTPException(status_code=422, detail="No extractable content found in the PDF.")
@@ -184,6 +189,8 @@ async def extract(file: UploadFile = File(...)):
         debug_path = settings.generated_dir / f"{file_id}.json"
         debug_payload = [
             {
+                "sequence": r.sequence,
+                "section": r.section,
                 "question_type": r.question_type.value,
                 "question_text": r.question_text,
                 "answer_text": r.answer_text,

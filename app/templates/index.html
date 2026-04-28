@@ -25,8 +25,8 @@
       <div class="card">
         <h1>PDF → Excel (Form Extraction)</h1>
         <p class="hint">
-          Upload a PDF form and download an Excel file with 3 columns:
-          <code>Question Type</code>, <code>English Question/Index Text</code>, <code>English Answer Text</code>.
+          Upload a PDF form and download an Excel file with 5 columns:
+          <code>Sequence</code>, <code>Section</code>, <code>Question Type</code>, <code>English Question/Index Text</code>, <code>English Answer Text</code>.
         </p>
 
         <form action="/extract" method="post" enctype="multipart/form-data">
@@ -39,6 +39,10 @@
         <div style="margin-top: 18px">
           <p class="hint"><strong>Output schema:</strong></p>
           <div class="cols">
+            <div><strong>Sequence</strong></div>
+            <div>Global row number across the final workbook after extraction cleanup</div>
+            <div><strong>Section</strong></div>
+            <div>The nearest form section or subsection governing the row, when available</div>
             <div><strong>Question Type</strong></div>
             <div>One of: Radio Button, Checkbox, Checkbox Group, Text Area, Text Box, Calendar, Display, Dropdown, Equation, Number, Radio Button with Text Area, Checkbox Group with Text Area, Signature</div>
             <div><strong>English Question/Index Text</strong></div>

@@ -65,6 +65,9 @@ Return ONLY valid JSON (no markdown) with this shape:
 {{
   "rows": [
     {{
+      "section": "<nearest visible section heading/subheading, or empty string>",
+      "section_confidence": <optional 0..1 number>,
+      "section_rationale": "<brief reason this is a true section, or empty string>",
       "question_type": "<one of the allowed values>",
       "question_text": "<English question / label / instruction / section title>",
       "answer_text": "<English expected answer text or options, pipe-separated where applicable>",
@@ -77,6 +80,12 @@ Return ONLY valid JSON (no markdown) with this shape:
 
 Rules:
 - question_type MUST be exactly one of: {", ".join(allowed_types)}.
+- section is only for a major form section/subsection that groups multiple related questions. Use the exact visible section text translated to English. If no true section is visible, applicable, or you are unsure, use "" and do not invent one.
+- Do NOT use page headers, repeated form titles, footers, field labels, table captions, attachment labels, standalone instructions, or single-question labels as section.
+- Good section examples: Applicant Information; Member Details; Current Living Arrangements; Clinical Information; Additional Required Documentation; Provider Attestation; Signature.
+- Bad section examples: Page 1 of 5; Form title; DOB; SSN; Date; Label attachment(s) as ...; Recent hospital admissions; Description of documentation attached; Admit Date.
+- When a true section heading governs multiple fields, repeat that same section value for each governed row until a new true section/subsection appears.
+- section_confidence is your confidence that section is a true section. If section_confidence would be below 0.75, return section as "".
 - Preserve the exact wording as much as possible; if non-English is present, translate to English.
 - Do not invent answers; answer_text describes what the respondent is expected to provide.
 - Radio Button: single-select answer options displayed; one row per radio group. answer_text is options pipe-separated. Use for visible radio circles/bubbles, or exclusive wording such as "select/choose one", "only one", or Yes/No choice pairs.

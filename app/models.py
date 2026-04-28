@@ -24,6 +24,8 @@ class QuestionType(str, Enum):
 
 
 class ExtractedRow(BaseModel):
+    sequence: Optional[int] = Field(default=None, ge=1)
+    section: str = ""
     question_type: QuestionType
     question_text: str = Field(min_length=1)
     answer_text: str = ""

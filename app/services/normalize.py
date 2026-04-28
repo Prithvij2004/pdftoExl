@@ -87,6 +87,7 @@ _CONTINUED_STANDALONE_RE = re.compile(
     r"^\s*(\(continued\)|continued|cont\.?|continuation|…|\.\.\.)\s*$",
     re.IGNORECASE,
 )
+_MARKDOWN_BOLD_RE = re.compile(r"\*\*(.*?)\*\*", re.DOTALL)
 
 
 def _clean_text(s: str) -> str:
@@ -94,6 +95,40 @@ def _clean_text(s: str) -> str:
     s = s.strip()
     s = _WS_RE.sub(" ", s)
     s = re.sub(r"\n{3,}", "\n\n", s)
+    return s
+
+
+def _clean_section(s: str) -> str:
+    s = _clean_text(s)
+    if not s:
+        return ""
+    s = _MARKDOWN_BOLD_RE.sub(r"\1", s)
+    s = s.strip()
+    if s.lower() in {"n/a", "na", "none", "not applicable", "unknown"}:
+        return ""
+    if s.lower().startswith(_HEADER_PREFIX.strip().lower()):
+        return ""
+    if _norm_key(s) in _STANDALONE_FIELD_LABELS:
+        return ""
+    if _PAGE_RE.match(s) or _URL_ONLY_RE.match(s) or _BARE_NUM_RE.match(s):
+        return ""
+    if len(s) <= 120 and any(
+        marker in s.lower()
+        for marker in (
+            "omb",
+            "control no",
+            "control number",
+            "form no",
+            "form number",
+            "revision",
+            "rev.",
+            "version",
+            "expires",
+            "expiration",
+            "effective date",
+        )
+    ):
+        return ""
     return s
 
 
@@ -167,6 +202,7 @@ def _merge_option_rows(anchor: ExtractedRow, cont: ExtractedRow) -> ExtractedRow
         merged_ans = _append_with_sep(anchor.answer_text, cont.answer_text, " | ")
     return anchor.model_copy(
         update={
+            "section": anchor.section or cont.section,
             "answer_text": merged_ans,
             "meta": _meta_add_continued_from(anchor.meta, cont.page_number),
         }
@@ -186,6 +222,7 @@ def _merge_textual_continuation(anchor: ExtractedRow, cont: ExtractedRow) -> Ext
         new_a = _append_with_sep(new_a, body_from_q)
     return anchor.model_copy(
         update={
+            "section": anchor.section or cont.section,
             "question_text": new_q,
             "answer_text": new_a,
             "meta": _meta_add_continued_from(anchor.meta, cont.page_number),
@@ -292,6 +329,28 @@ def _apply_choice_type_rules(r: ExtractedRow) -> ExtractedRow:
     return r.model_copy(update={"question_type": new_qt})
 
 
+def _apply_section_context(rows: list[ExtractedRow]) -> list[ExtractedRow]:
+    out: list[ExtractedRow] = []
+    current_section = ""
+
+    for r in rows:
+        explicit_section = _clean_section(r.section)
+
+        if explicit_section:
+            current_section = explicit_section
+            section = explicit_section
+        else:
+            section = current_section
+
+        out.append(r.model_copy(update={"section": section}))
+
+    return out
+
+
+def assign_sequences(rows: list[ExtractedRow]) -> list[ExtractedRow]:
+    return [r.model_copy(update={"sequence": idx}) for idx, r in enumerate(rows, start=1)]
+
+
 def _merge_continuation_rows(rows: list[ExtractedRow]) -> list[ExtractedRow]:
     if len(rows) < 2:
         return list(rows)
@@ -318,6 +377,7 @@ def normalize_rows(rows: list[ExtractedRow]) -> list[ExtractedRow]:
         cleaned.append(
             r.model_copy(
                 update={
+                    "section": _clean_section(r.section),
                     "question_text": _clean_text(r.question_text),
                     "answer_text": _clean_text(r.answer_text),
                 }
@@ -488,4 +548,4 @@ def normalize_rows(rows: list[ExtractedRow]) -> list[ExtractedRow]:
 
         out.append(r)
 
-    return out
+    return assign_sequences(_apply_section_context(out))

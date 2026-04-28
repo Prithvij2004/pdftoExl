@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from app.models import ExtractionResult, ExtractedRow, QuestionType
+from app.models import QuestionType
 from app.services import agentic_extractor
 from app.services.pdf_batches import PdfBatch
 
@@ -21,7 +21,7 @@ class _StubAgent:
         return _RunResult(self._output)
 
 
-def test_agentic_extractor_offline_uses_finalizer_when_available(monkeypatch, tmp_path: Path) -> None:
+def test_agentic_extractor_offline_returns_analysis_candidates(monkeypatch, tmp_path: Path) -> None:
     def _fake_batches(_pdf_path: Path, _batch_size: int):
         yield PdfBatch(batch_index=0, start_page_number=1, end_page_number=1, pdf_bytes=b"%PDF-1.4\n%")
 
@@ -38,28 +38,10 @@ def test_agentic_extractor_offline_uses_finalizer_when_available(monkeypatch, tm
             )
         ]
     )
-    finalized = ExtractionResult(
-        rows=[
-            ExtractedRow(
-                question_type=QuestionType.TEXT_BOX,
-                question_text="Full name",
-                answer_text="",
-                page_number=1,
-                source_order=0,
-                confidence=0.9,
-                meta={"rationale": "ok"},
-            )
-        ]
-    )
-
-    def _fake_bundle():
-        return agentic_extractor._AgentBundle(
-            analysis_agent=_StubAgent(analysis),
-            finalize_agent=_StubAgent(finalized),
-        )
 
     monkeypatch.setattr(agentic_extractor, "iter_pdf_page_batches", _fake_batches)
-    monkeypatch.setattr(agentic_extractor, "_bedrock_agent_bundle", _fake_bundle)
+    monkeypatch.setattr(agentic_extractor, "split_batch_into_single_pages", lambda batch: [batch])
+    monkeypatch.setattr(agentic_extractor, "_bedrock_analysis_agent", lambda: _StubAgent(analysis))
 
     pdf_path = tmp_path / "dummy.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n%")
@@ -70,13 +52,16 @@ def test_agentic_extractor_offline_uses_finalizer_when_available(monkeypatch, tm
     assert rows[0].question_text == "Full name"
 
 
-def test_agentic_extractor_offline_falls_back_to_candidates_on_finalize_failure(monkeypatch, tmp_path: Path) -> None:
+def test_agentic_extractor_offline_preserves_section_metadata(monkeypatch, tmp_path: Path) -> None:
     def _fake_batches(_pdf_path: Path, _batch_size: int):
         yield PdfBatch(batch_index=0, start_page_number=1, end_page_number=1, pdf_bytes=b"%PDF-1.4\n%")
 
     analysis = agentic_extractor.BatchAnalysis(
         candidates=[
             agentic_extractor.FieldCandidate(
+                section="Instructions",
+                section_confidence=0.95,
+                section_rationale="Major instruction section",
                 question_type=QuestionType.DISPLAY,
                 question_text="Instructions",
                 answer_text="",
@@ -88,18 +73,9 @@ def test_agentic_extractor_offline_falls_back_to_candidates_on_finalize_failure(
         ]
     )
 
-    class _FailingAgent:
-        async def run(self, *_args, **_kwargs):
-            raise ValueError("finalize failed")
-
-    def _fake_bundle():
-        return agentic_extractor._AgentBundle(
-            analysis_agent=_StubAgent(analysis),
-            finalize_agent=_FailingAgent(),
-        )
-
     monkeypatch.setattr(agentic_extractor, "iter_pdf_page_batches", _fake_batches)
-    monkeypatch.setattr(agentic_extractor, "_bedrock_agent_bundle", _fake_bundle)
+    monkeypatch.setattr(agentic_extractor, "split_batch_into_single_pages", lambda batch: [batch])
+    monkeypatch.setattr(agentic_extractor, "_bedrock_analysis_agent", lambda: _StubAgent(analysis))
 
     pdf_path = tmp_path / "dummy.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n%")
@@ -107,5 +83,8 @@ def test_agentic_extractor_offline_falls_back_to_candidates_on_finalize_failure(
 
     assert len(rows) == 1
     assert rows[0].question_type == QuestionType.DISPLAY
+    assert rows[0].section == "Instructions"
+    assert rows[0].meta.get("section_confidence") == 0.95
+    assert rows[0].meta.get("section_rationale") == "Major instruction section"
     assert rows[0].meta.get("rationale")
 

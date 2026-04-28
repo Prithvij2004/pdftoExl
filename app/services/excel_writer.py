@@ -11,7 +11,13 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from app.models import ExtractedRow
 
 
-HEADERS = ["Question Type", "English Question/Index Text", "English Answer Text"]
+HEADERS = [
+    "Sequence",
+    "Section",
+    "Question Type",
+    "English Question/Index Text",
+    "English Answer Text",
+]
 
 
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
@@ -58,19 +64,23 @@ def write_rows_to_xlsx(rows: list[ExtractedRow], out_path: Path) -> Path:
         c.alignment = header_alignment
 
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:C1"
+    ws.auto_filter.ref = f"A1:E1"
 
     body_alignment = Alignment(vertical="top", wrap_text=True)
 
     for i, r in enumerate(rows, start=2):
-        ws.cell(row=i, column=1, value=r.question_type.value).alignment = body_alignment
-        ws.cell(row=i, column=2, value=_to_rich_text(r.question_text)).alignment = body_alignment
-        ws.cell(row=i, column=3, value=r.answer_text).alignment = body_alignment
+        ws.cell(row=i, column=1, value=r.sequence or i - 1).alignment = body_alignment
+        ws.cell(row=i, column=2, value=r.section).alignment = body_alignment
+        ws.cell(row=i, column=3, value=r.question_type.value).alignment = body_alignment
+        ws.cell(row=i, column=4, value=_to_rich_text(r.question_text)).alignment = body_alignment
+        ws.cell(row=i, column=5, value=r.answer_text).alignment = body_alignment
 
     # Column widths
-    ws.column_dimensions["A"].width = 16
-    ws.column_dimensions["B"].width = 70
-    ws.column_dimensions["C"].width = 55
+    ws.column_dimensions["A"].width = 10
+    ws.column_dimensions["B"].width = 28
+    ws.column_dimensions["C"].width = 16
+    ws.column_dimensions["D"].width = 70
+    ws.column_dimensions["E"].width = 55
 
     # Row height (let Excel auto-fit visually; keep a minimum height for header)
     ws.row_dimensions[1].height = 24

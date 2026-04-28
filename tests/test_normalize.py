@@ -9,10 +9,12 @@ def _row(
     qt: QuestionType,
     q: str,
     a: str = "",
+    section: str = "",
     page: int,
     order: int,
 ) -> ExtractedRow:
     return ExtractedRow(
+        section=section,
         question_type=qt,
         question_text=q,
         answer_text=a,
@@ -189,4 +191,51 @@ def test_exclusive_wording_makes_radio_button() -> None:
     out = normalize_rows([r])
     assert len(out) == 1
     assert out[0].question_type == QuestionType.RADIO_BUTTON
+
+
+def test_section_is_cleaned_and_carried_forward() -> None:
+    rows = [
+        _row(qt=QuestionType.TEXT_BOX, section=" **Member Information:** ", q="First name", page=1, order=0),
+        _row(qt=QuestionType.CALENDAR, q="Date of birth", page=1, order=1),
+    ]
+
+    out = normalize_rows(rows)
+
+    assert [r.section for r in out] == ["Member Information:", "Member Information:"]
+
+
+def test_section_is_not_inferred_from_display_heading() -> None:
+    rows = [
+        _row(qt=QuestionType.DISPLAY, q="Provider Details", page=1, order=0),
+        _row(qt=QuestionType.TEXT_BOX, q="Provider name", page=1, order=1),
+    ]
+
+    out = normalize_rows(rows)
+
+    assert [r.section for r in out] == ["", ""]
+
+
+def test_field_label_section_is_removed() -> None:
+    rows = [
+        _row(qt=QuestionType.TEXT_BOX, section="DOB", q="Date of birth", page=1, order=0),
+        _row(qt=QuestionType.TEXT_BOX, section="Member Information", q="Name", page=1, order=1),
+    ]
+
+    out = normalize_rows(rows)
+
+    assert [r.section for r in out] == ["", "Member Information"]
+
+
+def test_sequence_is_global_after_normalization() -> None:
+    rows = [
+        _row(qt=QuestionType.DISPLAY, q="Page 1 of 2", page=1, order=9),
+        _row(qt=QuestionType.TEXT_BOX, q="Name", page=1, order=2),
+        _row(qt=QuestionType.CALENDAR, q="Date of birth", page=1, order=3),
+        _row(qt=QuestionType.TEXT_BOX, q="Address", page=2, order=1),
+    ]
+
+    out = normalize_rows(rows)
+
+    assert [r.question_text for r in out] == ["Name", "Date of birth", "Address"]
+    assert [r.sequence for r in out] == [1, 2, 3]
 

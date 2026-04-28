@@ -18,6 +18,15 @@ from app.services.pdf_batches import PdfBatch, iter_pdf_page_batches, split_batc
 
 
 class FieldCandidate(BaseModel):
+    section: str = Field(
+        default="",
+        description="Major form section/subsection governing this candidate, or empty if none/uncertain.",
+    )
+    section_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    section_rationale: str = Field(
+        default="",
+        description="Brief reason this is a true section (target <=60 chars; leave empty if no section).",
+    )
     question_type: QuestionType
     question_text: str = Field(min_length=1)
     answer_text: str = ""
@@ -29,9 +38,9 @@ class FieldCandidate(BaseModel):
         description="Brief justification for the classification (target <=60 chars; longer values are truncated downstream).",
     )
 
-    @field_validator("rationale", mode="before")
+    @field_validator("rationale", "section_rationale", mode="before")
     @classmethod
-    def _truncate_rationale(cls, v: object) -> str:
+    def _truncate_short_text(cls, v: object) -> str:
         if v is None:
             return ""
         s = str(v).strip()
@@ -76,6 +85,13 @@ def _analysis_prompt(batch: PdfBatch) -> list[object]:
             f"Pages in original PDF: {batch.start_page_number}..{batch.end_page_number}.\n\n"
             "Rules:\n"
             "- One candidate per input element or meaningful static instruction.\n"
+            "- section is only for a major form section/subsection that groups multiple related questions. Use the exact visible section text translated to English. If no true section is visible, applicable, or you are unsure, set section to an empty string.\n"
+            "- Do NOT use page headers, repeated form titles, footers, field labels, table captions, attachment labels, standalone instructions, or single-question labels as section.\n"
+            "- Good section examples: Applicant Information; Member Details; Current Living Arrangements; Clinical Information; Additional Required Documentation; Provider Attestation; Signature.\n"
+            "- Bad section examples: Page 1 of 5; Form title; DOB; SSN; Date; Label attachment(s) as ...; Recent hospital admissions; Description of documentation attached; Admit Date.\n"
+            "- When a true section heading governs multiple fields on the page, repeat that same section value for each governed candidate until a new true section/subsection appears.\n"
+            "- section_confidence is your confidence that section is a true section. If section_confidence would be below 0.75, return section as an empty string.\n"
+            "- section_rationale must be at most 60 characters and briefly explain why the section is a major grouping; leave empty when section is empty.\n"
             "- question_type must be one of: "
             + ", ".join([qt.value for qt in QuestionType])
             + ".\n"
@@ -113,15 +129,22 @@ def _analysis_prompt(batch: PdfBatch) -> list[object]:
 def _candidates_to_rows(analysis: BatchAnalysis) -> list[ExtractedRow]:
     rows: list[ExtractedRow] = []
     for c in analysis.candidates:
+        meta = {"rationale": c.rationale} if c.rationale else {}
+        if c.section_confidence is not None:
+            meta["section_confidence"] = c.section_confidence
+        if c.section_rationale:
+            meta["section_rationale"] = c.section_rationale
+
         rows.append(
             ExtractedRow(
+                section=c.section,
                 question_type=c.question_type,
                 question_text=c.question_text,
                 answer_text=c.answer_text,
                 page_number=c.page_number,
                 source_order=c.source_order,
                 confidence=c.confidence,
-                meta={"rationale": c.rationale} if c.rationale else {},
+                meta=meta,
             )
         )
     return rows

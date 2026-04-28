@@ -2,6 +2,8 @@
 
 Upload a PDF form and download a cleaned Excel file with these columns:
 
+- `Sequence`
+- `Section`
 - `Question Type`
 - `English Question/Index Text`
 - `English Answer Text`
