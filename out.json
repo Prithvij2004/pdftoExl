@@ -1,0 +1,988 @@
+{
+  "rows": [
+    {
+      "section": null,
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "TN Division of Health Care Finance & Administration logo",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": null,
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "Safety Determination Request Form",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": null,
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Applicant Name",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": null,
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "SSN",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": null,
+      "question_rule": null,
+      "question_type": "Date",
+      "question_text": "DOB",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": null,
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "This form is to be used only by an entity submitting a PAE for NF LOC and requesting a Safety Determination in accordance with requirements set forth in TennCare Rule. This form must be completed in its entirety and included with the PAE submission, along with all required documentation as specified below. An incomplete Safety Determination Request Form, or a Safety Determination Form submitted without documentation as specified below, will be denied.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": null,
+      "question_rule": null,
+      "question_type": "Number",
+      "question_text": "Total Acuity Score of PAE as submitted",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Current Living Arrangements:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "New Section",
+      "branching_logic": null,
+      "answer_text": "Current Living Arrangements:"
+    },
+    {
+      "section": "Current Living Arrangements:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "Applicant residence (if applicant currently resides in a NF, housing status prior to admission):",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Current Living Arrangements:",
+      "question_rule": null,
+      "question_type": "Checkbox Group",
+      "question_text": "Applicant residence",
+      "branching_logic": null,
+      "answer_text": "Lives in own home/apt (alone)\nLives in own home/apt (with spouse/partner)\nLives in own home/apt (with others)—specify relationship\nLives in other’s home—specify relationship\nAssisted living facility\nOther community-based residential (i.e., group home) setting—specify\nOther—specify"
+    },
+    {
+      "section": "Current Living Arrangements:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Specify relationship",
+      "branching_logic": "Display if Q10 = \"Lives in own home/apt (with others)—specify relationship\"",
+      "answer_text": ""
+    },
+    {
+      "section": "Current Living Arrangements:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Specify relationship",
+      "branching_logic": "Display if Q10 = \"Lives in other’s home—specify relationship\"",
+      "answer_text": ""
+    },
+    {
+      "section": "Current Living Arrangements:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Specify",
+      "branching_logic": "Display if Q10 = \"Other community-based residential (i.e., group home) setting—specify\"",
+      "answer_text": ""
+    },
+    {
+      "section": "Current Living Arrangements:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Specify",
+      "branching_logic": "Display if Q10 = \"Other—specify\"",
+      "answer_text": ""
+    },
+    {
+      "section": "Current Living Arrangements:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "If the applicant would not be able to return to or continue living in this residence, please explain why",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "New Section",
+      "branching_logic": null,
+      "answer_text": "Justification for Safety Determination Request:"
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "Please note that documentation as specified below may consist of, but is not limited to, narrative descriptions or explanations from submitter, caregivers, or family members; hospital notes, therapy notes, MD visits, ADL flow sheets, encounter notes from nurses, therapists, or physicians; and any other documents which would demonstrate the safety concern(s) for the applicant.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "Please check and complete all that apply. (While a single justification is sufficient for review of a Safety Determination request, it is critical that TennCare has benefit of all available information pertaining to safety concerns that could impact the applicant’s ability to be safely served in the community.)",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "The applicant has an approved acuity score of at least five (5) but no more than eight (8) and safety concerns impacting the applicant’s ability to be safely served in CHOICES Group 3 exist.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Provide a detailed description of the safety concern and include sufficient evidence showing that the necessary intervention and supervision needed by the applicant cannot be safely provided within the array of services and supports that would be available if the applicant was enrolled in Choices Group 3.",
+      "branching_logic": "If Q20 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "(Attach additional explanation if needed and any other documentation which would support the safety concerns detailed below. Label attachment(s) as \"Score 5-8 with Safety Concerns.\")",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Description of documentation attached",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "The applicant has an individual acuity score of at least 3 for the mobility or transfer measures and the absence of frequent intermittent assistance for mobility or transfer needs would result in imminent and serious risk to the applicant's health and safety.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Describe how often mobility and/or transfer assistance is needed by the member and the availability of paid and unpaid caregivers to provide such assistance, including any recent changes in the applicant's needs and/or availability of caregivers to meet such needs.",
+      "branching_logic": "If Q25 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Description of documentation attached",
+      "branching_logic": "If Q25 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "The applicant has an individual acuity score of at least 2 for the toileting measure, and the absence of frequent intermittent assistance for toileting needs would result in imminent and serious risk to the applicant's health and safety.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Describe how often toileting assistance is needed by the member and the availability of paid and unpaid caregivers to provide such assistance, including any recent changes in the applicant's needs and/or availability of caregivers to meet such needs.",
+      "branching_logic": "If Q28 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Description of documentation attached",
+      "branching_logic": "If Q28 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "The applicant has an individual acuity score of at least 3 for the Orientation measure and the absence of frequent intermittent or continuous intervention and supervision would result in imminent and serious risk of harm to the applicant and/or others.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Provide a detailed description of how orientation deficits impact the applicant’s safety, including information or examples that would support and describe the imminence and seriousness of risk.",
+      "branching_logic": "If Q31 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Description of documentation attached",
+      "branching_logic": "If Q31 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "The applicant has an individual acuity score of at least 2 for the Behavior measure and the absence of intervention and supervision for behaviors at the frequency specified in the PAE would result in imminent and serious risk of harm to the Applicant and/or others.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Provide a detailed description of the specific behavior(s), the frequency of each behavior, and information and/or examples which support and describe the imminence and seriousness of risk resulting from the behavior(s).",
+      "branching_logic": "If Q34 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Description of documentation attached",
+      "branching_logic": "If Q34 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "The applicant has experienced a significant change in physical or behavioral health or functional needs.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Provide a detailed description of the change(s), and how such changes impact the applicant’s need for assistance.",
+      "branching_logic": "If Q37 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Description of documentation attached",
+      "branching_logic": "If Q37 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "Applicant’s primary caregiver has experienced a significant change in physical or behavioral health or functional needs which impacts the availability of needed assistance for the applicant.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Provide a detailed description of the change(s), and how such changes impact the availability of needed assistance for the applicant.",
+      "branching_logic": "If Q40 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Description of documentation attached",
+      "branching_logic": "If Q40 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "Applicant has a pattern of recent falls resulting in injury or with significant potential for injury or a recent fall under circumstances indicating a significant potential risk for further falls.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Provide a detailed description of the fall(s) including the date of each incident, circumstances surrounding each fall, injury sustained as a result of the fall (if applicable) or significant potential for injury or risk for further falls, treatment received (if applicable), and interventions implemented to mitigate the risk of falls and injury from falls, and whether these interventions have been successful.",
+      "branching_logic": "If Q43 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Description of documentation attached",
+      "branching_logic": "If Q43 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "Applicant has an established pattern of recent emergent hospital admissions or emergency department utilization for emergent conditions or a recent hospital or NF admission or episode of treatment in a hospital emergency department under circumstances sufficient to indicate that the person may not be capable of being safely maintained in the community (not every hospital or NF admission or ER episode will be sufficient to indicate such).",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Document below and provide detailed explanation of any circumstances pertaining to such inpatient admission(s) or ER visit(s) which indicate that the person may not be capable of being safely maintained in the community, along with records from each admission or ER visit, e.g., discharge papers.",
+      "branching_logic": "If Q46 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Group Table",
+      "question_text": "Recent (last 365 days) hospital admissions",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Date",
+      "question_text": "Admit Date",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Date",
+      "question_text": "Discharge Date",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Reason for Admission",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Group Table",
+      "question_text": "Recent (last 365 days) ER visits (for emergent condition only)",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Date",
+      "question_text": "Date",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Reason for ER visit",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Group Table",
+      "question_text": "Recent (last 365 days) nursing facility admissions",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Date",
+      "question_text": "Admit Date",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Date",
+      "question_text": "Discharge Date",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Reason for admission",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Description of documentation attached",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "The applicant’s behaviors or a pattern of self-neglect has created a risk to personal health, safety and/or welfare requiring involvement by law enforcement or Adult Protective Services.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Provide a detailed description of the behaviors and/or pattern of self-neglect, the frequency of each such behavior or self-neglect, the risk to personal health, safety and/or welfare, the date of involvement by law enforcement or Adult Protective Services, and any actions taken by such agency to ensure the person’s safety.",
+      "branching_logic": "If Q58 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Description of documentation attached",
+      "branching_logic": "If Q58 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "The applicant has recently been discharged from a community-based residential alternative setting (or such discharge is pending) because the applicant’s needs can no longer be safety met in that setting.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Document below and attach documentation detailed description of the circumstances leading to discharge, including documentation from the CBRA. Include explanation regarding any other previous settings from which the applicant has been discharged due to safety concerns, including the date(s) of such admissions and discharge.",
+      "branching_logic": "If Q61 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Name of CBRA facility",
+      "branching_logic": "If Q61 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Date",
+      "question_text": "Date of discharge",
+      "branching_logic": "If Q61 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Safety concerns leading to discharge",
+      "branching_logic": "If Q61 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Description of documentation attached",
+      "branching_logic": "If Q61 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "The applicant has diagnosed complex acute or chronic medical conditions which require frequent, ongoing skilled and / or rehabilitative interventions and treatment by licensed professional staff.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Document below (attach additional explanation if needed) and attach current (last 365 days) medical records documenting each condition, including ongoing treatment prescribed, and the name, professional title, and contact information of the primary treating practitioner for each such condition.",
+      "branching_logic": "If Q66 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Group Table",
+      "question_text": "Medical Condition Table",
+      "branching_logic": "If Q66 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Medical Condition",
+      "branching_logic": "If Q66 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Acute or Chronic",
+      "branching_logic": "If Q66 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Intervention Required",
+      "branching_logic": "If Q66 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Licensed staff required",
+      "branching_logic": "If Q66 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Description of documentation attached",
+      "branching_logic": "If Q66 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "The applicant requires post- acute inpatient treatment for a specified period of time to allow for stabilization, rehabilitation or intensive teaching in order to facilitate a safe transition into the community.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Acute event",
+      "branching_logic": "If Q72 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Treatment required",
+      "branching_logic": "If Q72 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Duration of time needed",
+      "branching_logic": "If Q72 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "The applicant’s MCO has determined, upon enrollment into Group 3 based on a PAE submitted by another entity, that the applicant’s needs cannot be safely met within the array of services and supports available if enrolled in Group 3.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "None of the criteria above have been met, but other safety concerns which impact the applicant being safely served in CHOICES Group 3 exist.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Provide a detailed description of the safety concern and include sufficient evidence showing that the necessary intervention and supervision needed by the applicant cannot be safely provided within the array of services and supports that would be available if the applicant was enrolled in Choices Group 3.",
+      "branching_logic": "If Q77 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Description of documentation attached",
+      "branching_logic": "If Q77 = checked(selected)",
+      "answer_text": ""
+    },
+    {
+      "section": "Justification for Safety Determination Request:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "The applicant is a current CHOICES Group 1 or 2 member or PACE member enrolled on or after 7/1/2012 and has been determined upon review to no longer meet NF LOC requirements based on a total acuity score of 9 or above, but because of specific safety concerns, still requires the level of care currently being provided. Safety justification and associated documentation must be represented in at least one of the areas listed above.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "New Section",
+      "branching_logic": null,
+      "answer_text": "Additional Required Documentation:"
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "In addition to the information specified above to support each of the safety concerns identified, you must attach:",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "A comprehensive needs assessment, including:",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "an assessment of the applicant’s physical, behavioral, and psychosocial needs not reflected in the PAE;",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "the specific tasks and functions for which assistance is needed by the Applicant;",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "the frequency with which such tasks must be performed; and",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "the Applicant’s need for safety monitoring and supervision",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "Label attachment(s) as “Comprehensive Needs Assessment.”",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "A detailed description of the Applicant’s living arrangements and the services and supports the Applicant has received during the six (6) months prior to submission of the Safety Determination request, including unpaid care provided by family members and other caregivers, paid services and supports the Applicant has been receiving regardless of payer (e.g., non-CHOICES HCBS available through TennCare such as home health and services available through Medicare, private insurance or other funding sources); and any anticipated change in the availability of such care or services from the current caregiver or payer",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "Label attachment(s) as \"Prior 6 Months.\"",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "A detailed explanation regarding any recent significant event(s) or circumstances that have impacted the Applicant’s need for services and supports, including how such event(s) or circumstances impact the Applicant’s ability to be safely supported within the array of covered services and supports that would be available if the Applicant were enrolled in CHOICES Group 3",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "Label attachment(s) as \"Recent Events.\"",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "A person-centered plan of care developed by the MCO Care Coordinator, NF, or PACE Organization (i.e., the entity submitting the Safety Determination request) which specifies the tasks and functions for which assistance is needed by the Applicant, the frequency with which such tasks must be performed, the Applicant’s need for safety monitoring and supervision; and the amount (e.g., minutes, hours, etc.) of paid assistance that would be necessary to provide such assistance; and that would be provided by such entity upon approval of the Safety Determination. (A plan of care is not required for a Safety Determination submitted by the AAAD.) In the case of a Safety Determination request submitted by an MCO or AAAD for a NF resident, the plan of care shall be developed in collaboration with the NF, as appropriate. To the extent that all of the required information is not specified in a NF Plan of Care, please attach the Plan of Care along with additional documentation regarding tasks and functions, frequency, etc., that will help to describe why the person’s needs cannot be safely met in CHOICES Group 3, and why the higher level of care is appropriate.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "Label attachment(s) as \"Plan of Care.\"",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "A detailed explanation regarding why the array of covered services and supports, including CHOICES HCBS up to the Expenditure Cap of $15,000 and non- CHOICES HCBS (e.g., home health), services available through Medicare, private insurance or other funding sources, and unpaid supports provided by family members and other caregivers would not be sufficient to safely meet the applicant’s needs in the community",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Additional Required Documentation:",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "Label attachment(s) as \"Safety Explanation.\"",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Submitting Entity Attestation",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "New Section",
+      "branching_logic": null,
+      "answer_text": "Submitting Entity Attestation"
+    },
+    {
+      "section": "Submitting Entity Attestation",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "Completed Attestation, printed name, signature, credentials and date of form completion are required.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Submitting Entity Attestation",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "Please read and check at least one of the statements below (check all that apply):",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Submitting Entity Attestation",
+      "question_rule": null,
+      "question_type": "Checkbox Group",
+      "question_text": "Attestation statements",
+      "branching_logic": null,
+      "answer_text": "I do not believe this individual can be safely served in the community in CHOICES Group 3.\nI believe this individual can be safely served in the community in CHOICES Group 3."
+    },
+    {
+      "section": "Submitting Entity Attestation",
+      "question_rule": null,
+      "question_type": "Checkbox",
+      "question_text": "This safety determination form was completed at the request of the applicant/representative.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Submitting Entity Attestation",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "By signing below, I, as a licensed professional, take responsibility for the information provided in this Safety Determination request and attest that I have personally reviewed the information provided in this Safety Determination Request and it is accurate and true to the best of my knowledge. I understand that this information will be used to determine the applicant’s eligibility and/or reimbursement for long-term care services. I understand that any intentional act or omission on my part to provide false information or give a false impression that would potentially result in a person obtaining benefits or coverage to which s/he is not entitled may be considered an act of fraud under the state’s TennCare program and Title XIX of the Social Security Act. I further understand that, under the Tennessee Medicaid False Claims Act, any person who presents or causes to be presented to the State a claim for payment under the TennCare program knowing such claim is false or fraudulent may be subject to federal and state civil and criminal penalties.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Submitting Entity Attestation",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Printed Name of person making this decision",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Submitting Entity Attestation",
+      "question_rule": null,
+      "question_type": "Signature",
+      "question_text": "Signature of person making this decision",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Submitting Entity Attestation",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Credentials",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Submitting Entity Attestation",
+      "question_rule": null,
+      "question_type": "Date",
+      "question_text": "Date",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Fall Documentation",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "New Section",
+      "branching_logic": null,
+      "answer_text": "Fall Documentation"
+    },
+    {
+      "section": "Fall Documentation",
+      "question_rule": null,
+      "question_type": "Display",
+      "question_text": "Please use this form when the justification for a safety determination request is related to a recent fall(s). Provide any available information for falls occurring within the last 6 months. Most recent fall should be listed first. All fields are not required, but providing all the details available will help ensure that the correct LOC is approved for this person.",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Fall Documentation",
+      "question_rule": null,
+      "question_type": "Number",
+      "question_text": "Fall #",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Fall Documentation",
+      "question_rule": null,
+      "question_type": "Date",
+      "question_text": "Date of fall",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Fall Documentation",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Time of Fall",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Fall Documentation",
+      "question_rule": null,
+      "question_type": "Dropdown",
+      "question_text": "AM / PM",
+      "branching_logic": null,
+      "answer_text": "AM\nPM"
+    },
+    {
+      "section": "Fall Documentation",
+      "question_rule": null,
+      "question_type": "Text Box",
+      "question_text": "Location of Fall",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Fall Documentation",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "What was applicant doing prior to fall?",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Fall Documentation",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "List factors contributing to fall (environment, meds, etc...)",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Fall Documentation",
+      "question_rule": null,
+      "question_type": "Radio Button",
+      "question_text": "Was an injury sustained related to fall?",
+      "branching_logic": null,
+      "answer_text": "YES\nNO"
+    },
+    {
+      "section": "Fall Documentation",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "If yes, describe",
+      "branching_logic": "Display if Q101 = \"YES\"",
+      "answer_text": ""
+    },
+    {
+      "section": "Fall Documentation",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "What mechanisms are in place to prevent falls?",
+      "branching_logic": null,
+      "answer_text": ""
+    },
+    {
+      "section": "Fall Documentation",
+      "question_rule": null,
+      "question_type": "Text Area",
+      "question_text": "Why were these prevention mechanisms unsuccessful?",
+      "branching_logic": null,
+      "answer_text": ""
+    }
+  ]
+}
