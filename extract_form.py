@@ -88,45 +88,66 @@ class FormRow(BaseModel):
             "Rules:\n"
             "- Display: any instruction, knowledge, narrative, header note, "
             "  or guidance block that does NOT ask the form-filler for an "
-            "  answer. This includes any free-standing prose that appears "
-            "  immediately after a section heading. For Display rows the "
-            "  raw text goes into question_text VERBATIM and answer_text "
-            "  MUST stay blank — do NOT invent a synthetic question and move "
-            "  the prose into answer_text.\n"
-            "- Text Box: single-line free-text input (e.g. 'Name: ____').\n"
-            "- Text Area: multi-line free-text input.\n"
+            "  answer. For Display rows the raw text goes into question_text "
+            "  VERBATIM and answer_text MUST stay blank.\n"
+            "- Text Box: single-line free-text input. Any 'Label: ____' blank "
+            "  whose answer fits on one line is Text Box. This INCLUDES "
+            "  'Description of documentation attached: ____', 'Name of CBRA "
+            "  facility: ____', 'Specify: ____', 'Acute event: ____', etc. "
+            "  The number of underscores is NOT a signal — many forms render "
+            "  one logical line with a long underline.\n"
+            "- Text Area: ONLY when the form clearly reserves MULTIPLE "
+            "  consecutive blank lines (e.g. 4+ stacked underline rows) for "
+            "  the answer, OR the prompt explicitly says 'describe in detail' "
+            "  / 'provide a detailed description' / 'explain' AND the layout "
+            "  shows a multi-line answer area. If unsure, choose Text Box.\n"
             "- Date: any field labeled date/dob/birth or formatted MM/DD/YYYY.\n"
             "- Number: fields labeled score/count/age/number/# or numeric-only.\n"
             "- Signature: a signature line (lone 'signature' label).\n"
-            "- Radio Button: a question with mutually-exclusive options where "
-            "  exactly one must be selected. question_text holds the prompt; "
-            "  answer_text lists the options one per line.\n"
+            "- Radio Button: a single prompt followed by mutually-exclusive "
+            "  options where exactly one must be selected. The prompt becomes "
+            "  question_text and the options become answer_text (one option "
+            "  per line, verbatim, in document order). DO NOT split this into "
+            "  a Display row for the prompt plus a separate row for the "
+            "  options — they are ONE Radio Button row. Residence/marital/"
+            "  relationship/location-style option lists are inherently "
+            "  mutually exclusive and are Radio Button (or Dropdown), never "
+            "  Checkbox Group, even when each option ends with '—specify…'.\n"
             "- Checkbox: a SINGLE standalone check item with no sibling "
             "  options (a lone yes/acknowledgement-style box).\n"
-            "- Checkbox Group: a question whose answer set allows MULTIPLE "
-            "  options to be selected simultaneously (independent flags, "
-            "  'check all that apply' semantics). question_text holds the "
-            "  prompt; answer_text lists the options one per line.\n"
-            "- Dropdown: a select-one field with a discrete, mutually-"
-            "  exclusive option list. PREFER Dropdown over Radio Button when "
-            "  the option set is short (roughly <=7) AND clearly mutually "
-            "  exclusive. Use Radio Button only when the form visually lays "
-            "  the options out as bulleted/glyph-prefixed choices that "
-            "  strongly imply radio rendering.\n"
-            "- Group Table: a multi-row table. Emit ONE row whose "
-            "  question_text is the table title; emit a separate following "
-            "  row per column header (typed by column label). Do NOT extract "
-            "  data rows inside the table.\n"
-            "Composite 'X with Text Area' types are NOT allowed; split into a "
-            "parent row plus a separate gated Text Area row.\n"
-            "GLYPH-INDEPENDENCE (important): Do NOT classify a row as "
-            "Checkbox, Checkbox Group, or Radio Button merely because the "
-            "PDF shows a tick (✓), check (☑), square (☐), or bullet glyph. "
-            "Glyphs are decorative and inconsistent across forms. Decide the "
-            "type purely from semantics: does the row ASK for an answer "
-            "(Checkbox / Checkbox Group / Radio Button / Dropdown), or is it "
-            "informational prose (Display)? Pre-ticked or glyph-prefixed "
-            "instruction lines that don't actually request input are Display."
+            "- Checkbox Group: ONLY when ALL of the following are true: "
+            "  (a) the prompt explicitly says 'check all that apply' / "
+            "  'select all that apply' OR the options are semantically "
+            "  independent flags; AND (b) the options are short, parallel, "
+            "  self-contained statements (NOT multi-sentence criterion "
+            "  paragraphs each with their own follow-up questions); AND "
+            "  (c) NONE of the options have indented 'o'-bulleted child "
+            "  questions or follow-up Text Area/Text Box prompts beneath "
+            "  them. If any option has its OWN gated follow-up row, the "
+            "  parent is NOT a Checkbox Group — each option is its own "
+            "  standalone Checkbox row with the follow-up as a sibling "
+            "  gated row. Default AWAY from Checkbox Group when in doubt — "
+            "  prefer Radio Button or a series of standalone Checkbox rows.\n"
+            "- Dropdown: a select-one field with a short (<=7) mutually-"
+            "  exclusive option list rendered inline (e.g. 'AM / PM').\n"
+            "- Group Table: a multi-row/multi-column table. The FIRST row "
+            "  has question_type='Group Table' and question_text = the "
+            "  table's title verbatim. If the table has no visible title, "
+            "  generate a short descriptive title from the columns (e.g. "
+            "  'Hospital admissions table'). Then emit ONE row per column "
+            "  header, in left-to-right order, where question_text is the "
+            "  bare column label EXACTLY as printed (do NOT prepend the "
+            "  table title or any prefix) and question_type is inferred "
+            "  from the column label (date|admit date|discharge date -> "
+            "  Date; reason|description|notes -> Text Box; etc.). Drop "
+            "  data rows entirely. EACH distinct table is its OWN Group "
+            "  Table parent + its OWN column rows — never merge two "
+            "  separate tables (different titles or different column sets) "
+            "  into a single Group Table.\n"
+            "Composite 'X with Text Area' types are NOT allowed.\n"
+            "GLYPH-INDEPENDENCE: Tick (✓), check (☑), square (☐), or bullet "
+            "  glyphs are decorative — they do NOT determine the type. Decide "
+            "  purely from semantics."
         ),
     )
     question_text: str = Field(
@@ -179,58 +200,91 @@ class ExtractedForm(BaseModel):
         description=(
             "All rows of the output workbook, in document order.\n\n"
             "Required behaviors:\n"
-            "1. SECTIONS. When a section heading appears in the document, "
-            "   emit a single MARKER row at that boundary with "
-            "   question_type='Display', question_text='New Section', "
-            "   answer_text=<section heading text>. The marker row itself "
-            "   AND every subsequent row must carry the NEW heading text in "
-            "   the `section` field — switch immediately, never keep the "
-            "   previous section's name. The new value persists until the "
-            "   next section heading. Rows before the first heading have a "
-            "   blank `section`. Emit the marker only at the boundary, not "
-            "   on every row.\n"
-            "   Any free-standing instruction/prose that appears between a "
-            "   section heading and the first real question is its OWN "
-            "   Display row (question_text = the prose verbatim, "
-            "   answer_text blank). Do NOT fold that prose into the section "
-            "   marker's answer_text and do NOT invent a question for it.\n"
-            "2. BLANK FIELDS. 'Label: ____' blanks become rows. Type by label "
-            "   semantics: date|dob|birth -> Date; score|count|age|number|# "
-            "   -> Number; lone 'signature' -> Signature; else Text Box.\n"
-            "3. OPTIONS. Consecutive options after a question form ONE row "
-            "   whose answer_text lists them (one per line). Decide the "
-            "   parent's question_type semantically, NOT from glyph shape:\n"
-            "   - Mutually-exclusive options, short list (<=7) -> Dropdown "
-            "     (preferred).\n"
-            "   - Mutually-exclusive options laid out as bulleted/glyph-"
-            "     prefixed visual choices -> Radio Button.\n"
-            "   - Multiple independent options that may all be selected "
-            "     ('check all that apply', flag-style lists) -> Checkbox "
-            "     Group (one row, options in answer_text).\n"
+            "1. SECTIONS. When a section heading appears, emit a MARKER row "
+            "   with question_type='Display', question_text='New Section', "
+            "   answer_text=<heading text>. Every row from the marker onward "
+            "   carries the NEW heading in `section` until the next heading. "
+            "   Rows before the first heading have blank `section`. Emit the "
+            "   marker once per boundary. Free-standing prose between a "
+            "   heading and the first question is its OWN Display row.\n"
+            "2. BLANK FIELDS. 'Label: ____' blanks become rows typed by "
+            "   label: date|dob|birth -> Date; score|count|age|number|# -> "
+            "   Number; lone 'signature' -> Signature; else Text Box. Long "
+            "   underlines do NOT make a field Text Area — only stacked "
+            "   multi-line answer areas do.\n"
+            "3. OPTIONS — MERGE INTO ONE ROW. A prompt followed by its "
+            "   option list is ONE row, NOT two. Put the prompt in "
+            "   question_text and the options in answer_text (one per line). "
+            "   NEVER emit a Display row for the prompt and a separate row "
+            "   for the options — that is wrong. Type selection:\n"
+            "   - Inline short list like 'AM / PM' -> Dropdown.\n"
+            "   - Mutually-exclusive vertical list (residence, location, "
+            "     relationship, status, yes/no) -> Radio Button. This is the "
+            "     default for any vertical option list with square/bullet "
+            "     glyphs unless the prompt explicitly says 'check all that "
+            "     apply' / 'select all that apply'.\n"
+            "   - 'check all that apply' / 'select all that apply' / "
+            "     independent flags -> Checkbox Group.\n"
             "   - A single standalone box with no siblings -> Checkbox.\n"
-            "   Tick / check / square glyphs are NOT signal — ignore them "
-            "   when choosing the type.\n"
-            "4. TABLES. A multi-row table becomes ONE Group Table row "
-            "   (question_text = table title) followed by one row per column "
-            "   header, each typed by column label. Data rows are dropped.\n"
+            "   Glyph shape (☐ ☑ ✓ •) is NOT a signal — semantics decide.\n"
+            "4. TABLES. EACH distinct table becomes ITS OWN Group Table "
+            "   row (question_text = table title verbatim, or a short "
+            "   generated title if none exists) followed by ONE row per "
+            "   column header. Column-header rows: question_text = the bare "
+            "   column label (no table-title prefix), question_type = "
+            "   inferred from the label (Date for date/admit/discharge; "
+            "   Text Box for reason/description; Number for count/score). "
+            "   Drop all data rows. NEVER merge two visually separate "
+            "   tables (different titles, different columns, different "
+            "   purposes) into one Group Table — emit each separately.\n"
             "5. CHECKBOX FOLLOW-UPS. An indented 'o'-bulleted prompt or "
             "   'Description of documentation attached: ____' line under a "
-            "   checkbox is a SIBLING gated row (Text Area or Text Box), not "
-            "   an option of the checkbox. Set its branching_logic to "
+            "   parent checkbox is a SIBLING gated row, NOT an option of "
+            "   the checkbox. Set branching_logic = "
             "   'If Q{n} = checked(selected)'.\n"
-            "6. SPECIFIERS. A 'Specify' / 'Specify other' field after an "
-            "   option containing 'other'/'specify' becomes a SEPARATE Text "
-            "   Box row gated on that exact option: branching_logic = "
+            "6. SPECIFIERS. A 'Specify' / 'Specify other' blank after an "
+            "   option containing 'other'/'specify' is a SEPARATE Text Box "
+            "   row gated on that exact option: branching_logic = "
             "   'Display if Q{n} = \"<option verbatim>\"'.\n"
-            "7. REPEAT BANDS. Drop decorative repeats that appear on every "
-            "   page (page numbers, form codes, agency footer strings). Keep "
-            "   identifier banners only on the first page and promote them "
-            "   to questions.\n"
-            "8. CROSS-PAGE STITCHING. If a question's options spill onto the "
-            "   next page, merge into ONE row.\n"
-            "9. QUESTION RULE. Populate question_rule from leading "
-            "   'For <population>:' prefixes or italic prelude blocks.\n"
-            "10. ORDER. Rows must follow document reading order exactly."
+            "7. REPEATING TEMPLATES — EMIT ONCE. Some forms repeat the SAME "
+            "   field block multiple times (e.g. four identical 'Fall #' "
+            "   blocks across pages 10-11; multiple 'Applicant Name / SSN / "
+            "   DOB' identifier banners on every page; repeated table data "
+            "   rows). Emit the field set EXACTLY ONCE — the FIRST "
+            "   occurrence — and do NOT emit duplicates of the same "
+            "   template, even when subsequent copies appear on later pages. "
+            "   Two blocks count as 'the same template' when their labels "
+            "   match (case-insensitive) in the same order.\n"
+            "8. NOISE TO DROP ENTIRELY. Do NOT emit rows for: agency logos, "
+            "   form codes ('TC0175 (Rev. 8-2-16)', 'RDA 2047'), page "
+            "   numbers, recurring page-header titles ('Safety Determination "
+            "   Request Form' repeated on every page), footers, watermarks, "
+            "   or any decorative repeat band. The form TITLE itself is also "
+            "   not a question — drop it. Start the output at the first "
+            "   real field or prose block.\n"
+            "9. CROSS-PAGE STITCHING. A question whose options or answer "
+            "   area spill onto the next page merges into ONE row. This "
+            "   applies to Radio Button, Checkbox Group, and Dropdown: if "
+            "   options 1-2 are at the bottom of page N and option 3 is at "
+            "   the top of page N+1 with no intervening section heading, "
+            "   ALL options belong in the SAME parent row's answer_text. "
+            "   Do NOT emit option 3 as a separate Checkbox row. Treat the "
+            "   options as a continuous list across the page break.\n"
+            "9a. NO FALSE GROUPING. Do NOT bundle a list of long criterion "
+            "    paragraphs into a single Checkbox Group when each "
+            "    criterion has its OWN indented follow-up question(s) "
+            "    beneath it (e.g. 'Provide a detailed description...', "
+            "    'Describe how often...', 'Document below...'). That "
+            "    layout is a series of independent Checkbox parents, each "
+            "    with sibling gated follow-up rows. The presence of any "
+            "    'o'-bulleted child question under an option is "
+            "    DEFINITIVE proof it is NOT a Checkbox Group option — it "
+            "    is its own Checkbox parent.\n"
+            "10. QUESTION RULE. Populate question_rule from leading "
+            "    'For <population>:' prefixes or italic prelude blocks.\n"
+            "11. NO EMPTY ROWS. Never emit a row with empty question_text. "
+            "    If you have no prompt text, drop the row entirely.\n"
+            "12. ORDER. Rows must follow document reading order exactly."
         ),
     )
 
@@ -241,13 +295,52 @@ SYSTEM_PROMPT = (
     "You are converting a government intake/assessment/eligibility PDF form "
     "into a strict 7-column row schema for downstream re-rendering. The PDF "
     "is digitally generated (not scanned) and may or may not have AcroForm "
-    "widgets. Your job is to recover the form's logical structure — sections, "
-    "questions, fields, options, tables, gated follow-ups — purely from "
-    "layout, glyphs, indentation, and blank-field patterns. Never use form-"
-    "specific knowledge. Follow the schema field descriptions exactly: the "
-    "question_type taxonomy is closed, branching_logic has only two allowed "
-    "templates, and section markers are emitted only at section boundaries. "
-    "Emit every row in document reading order."
+    "widgets. Recover the form's logical structure — sections, questions, "
+    "fields, options, tables, gated follow-ups — purely from layout, "
+    "indentation, and blank-field patterns. Glyph shape is decorative and "
+    "must NEVER drive type choice.\n\n"
+    "CRITICAL RULES (these are the most common failure modes):\n"
+    "1. Drop ALL noise: agency logos, form codes (e.g. 'TC0175 (Rev. ...)'), "
+    "   'RDA' codes, page numbers, recurring page-header titles, footers, "
+    "   identifier banners that repeat on every page (e.g. 'Applicant Name "
+    "   / SSN / DOB' shown on every page header). The repeated header "
+    "   appears on the FIRST page only conceptually, but for this schema "
+    "   the safe choice is to drop the page-header banner entirely. Real "
+    "   identifier fields embedded in the form body are kept.\n"
+    "2. Repeating field blocks (e.g. four identical 'Fall #' blocks; the "
+    "   same medical condition row repeated; table data rows) are emitted "
+    "   ONCE — the first instance only. Never duplicate.\n"
+    "3. A prompt and its option list are ONE row, not two. Put the prompt "
+    "   in question_text and options in answer_text. Do NOT emit a separate "
+    "   Display row for the prompt followed by a Checkbox Group row for "
+    "   the options — that is the wrong split.\n"
+    "4. Vertical option lists rendered with bullet/square glyphs are Radio "
+    "   Button by default. Only use Checkbox Group when the prompt clearly "
+    "   says 'check all that apply' AND the options are short parallel "
+    "   self-contained statements with NO indented follow-up questions. "
+    "   If any option has its own 'o'-bulleted child prompt beneath it, "
+    "   the option is its own standalone Checkbox parent — NOT a Checkbox "
+    "   Group entry. A list of multi-sentence criterion paragraphs each "
+    "   with their own follow-up Text Area is a series of Checkbox rows, "
+    "   not a Checkbox Group.\n"
+    "4a. Cross-page option stitching: if a Radio Button / Checkbox Group / "
+    "    Dropdown's options span a page break (e.g. 2 options at the "
+    "    bottom of page N, 1 option at the top of page N+1), MERGE them "
+    "    into one row's answer_text. Never emit the spilled option as a "
+    "    separate row.\n"
+    "4b. Group Table: each distinct table is its OWN Group Table row "
+    "    (question_text = table title verbatim, or a short generated "
+    "    title if none exists) followed by ONE row per column header "
+    "    (question_text = bare column label, NOT prefixed with the table "
+    "    title). NEVER merge two separate tables into one Group Table.\n"
+    "5. Text Area is ONLY for true multi-line answer areas (4+ stacked "
+    "   underline rows or explicit 'describe in detail'). Single-line "
+    "   labeled blanks like 'Description of documentation attached: ____' "
+    "   are Text Box even with long underlines.\n"
+    "6. Never emit a row with empty question_text.\n\n"
+    "Follow the schema field descriptions exactly. The question_type "
+    "taxonomy is closed; branching_logic has only two templates. Emit "
+    "every row in document reading order."
 )
 
 
@@ -267,6 +360,8 @@ def run_extract(pdf_path: Path, api_key: str) -> ExtractedForm:
             "extraction_target": "per_doc",
             "tier": "agentic",
             "system_prompt": SYSTEM_PROMPT,
+            "cite_sources": True,
+            "confidence_scores": True,
         },
     )
 
@@ -280,6 +375,111 @@ def run_extract(pdf_path: Path, api_key: str) -> ExtractedForm:
         raise RuntimeError(f"Extraction job ended with status={job.status}")
 
     return ExtractedForm.model_validate(job.extract_result)
+
+
+# ----------------------- Post-processing safety net -----------------------
+
+import re
+
+_NOISE_PATTERNS = [
+    re.compile(r"^TC\d{3,5}\s*\(Rev", re.I),
+    re.compile(r"^RDA\s*\d+", re.I),
+    re.compile(r"^page\s*\d+\s*(of\s*\d+)?$", re.I),
+    re.compile(r"^\d+\s+Safety Determination Request Form\s*$", re.I),
+    re.compile(r"logo$", re.I),
+]
+
+_LABELED_BLANK_HINTS = (
+    "description of documentation attached",
+    "name of",
+    "specify",
+    "acute event",
+    "treatment required",
+    "duration of",
+    "credentials",
+    "printed name",
+    "reason for",
+)
+
+
+def _is_noise(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return True
+    return any(p.search(t) for p in _NOISE_PATTERNS)
+
+
+def _template_key(rows: List[FormRow], start: int, length: int) -> tuple:
+    return tuple(
+        (r.question_type, (r.question_text or "").strip().lower())
+        for r in rows[start : start + length]
+    )
+
+
+def _dedupe_repeating_templates(rows: List[FormRow]) -> List[FormRow]:
+    """Detect runs of identical field blocks (e.g. four 'Fall #' blocks) and
+    keep only the first occurrence."""
+    if not rows:
+        return rows
+    # Find anchor labels that look like template starts (short, ends with '#'
+    # or matches 'fall #', 'block', etc.). Generic: any row whose question_text
+    # appears 2+ times anywhere in the list is a candidate anchor.
+    text_counts: dict[str, int] = {}
+    for r in rows:
+        key = (r.question_text or "").strip().lower()
+        if key:
+            text_counts[key] = text_counts.get(key, 0) + 1
+
+    repeat_anchors = {k for k, c in text_counts.items() if c >= 2}
+    if not repeat_anchors:
+        return rows
+
+    seen_blocks: set[tuple] = set()
+    out: List[FormRow] = []
+    i = 0
+    while i < len(rows):
+        key = (rows[i].question_text or "").strip().lower()
+        if key in repeat_anchors:
+            # measure block length: extend until next anchor or end
+            j = i + 1
+            while j < len(rows):
+                jk = (rows[j].question_text or "").strip().lower()
+                if jk in repeat_anchors and jk == key:
+                    break
+                j += 1
+            block_sig = _template_key(rows, i, j - i)
+            if block_sig in seen_blocks:
+                i = j
+                continue
+            seen_blocks.add(block_sig)
+            out.extend(rows[i:j])
+            i = j
+        else:
+            out.append(rows[i])
+            i += 1
+    return out
+
+
+def _coerce_text_area_to_text_box(row: FormRow) -> FormRow:
+    if row.question_type != "Text Area":
+        return row
+    qt = (row.question_text or "").strip().lower().rstrip(":")
+    if any(h in qt for h in _LABELED_BLANK_HINTS) and len(qt) < 80:
+        row.question_type = "Text Box"
+    return row
+
+
+def post_process(form: ExtractedForm) -> ExtractedForm:
+    cleaned: List[FormRow] = []
+    for r in form.rows:
+        if _is_noise(r.question_text or ""):
+            continue
+        if not (r.question_text or "").strip():
+            continue
+        cleaned.append(_coerce_text_area_to_text_box(r))
+    cleaned = _dedupe_repeating_templates(cleaned)
+    form.rows = cleaned
+    return form
 
 
 # ----------------------- Excel writer -----------------------
@@ -361,6 +561,7 @@ def main() -> int:
     out_path = args.output or args.pdf.with_suffix(".xlsx")
 
     form = run_extract(args.pdf, api_key)
+    form = post_process(form)
 
     if args.dump_json:
         args.dump_json.parent.mkdir(parents=True, exist_ok=True)
