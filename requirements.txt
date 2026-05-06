@@ -1,7 +1,12 @@
 fastapi
+boto3
+logfire[fastapi,pydantic-ai]
+docling
 llama-cloud
 openpyxl
 pydantic
+pydantic-ai
+PyMuPDF
 python-dotenv
 python-multipart
 uvicorn
