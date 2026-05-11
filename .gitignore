@@ -12,6 +12,7 @@ __pycache__/
 
 # Runtime files (uploads, generated xlsx, debug json)
 runtime/
+markdowns/
 
 # Sample/source documents (often large/binary)
 docs/

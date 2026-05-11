@@ -1,35 +1,30 @@
 from __future__ import annotations
 
-from dotenv import load_dotenv
 from pathlib import Path
 
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-# Ensure arbitrary .env vars (like AWS_ACCESS_KEY_ID) are available to boto3.
-# BaseSettings reads .env into Settings fields, but boto3 relies on process env vars.
-load_dotenv(".env", override=False)
+load_dotenv(".env", override=False, encoding="utf-8-sig")
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 
+    pdf_parser: str = "docling"
+    output_dir: Path = Path("outputs")
+    llm_provider: str = "bedrock"
+    llm_temperature: float = 0.0
+    llm_max_tokens: int = 8192
     aws_region: str = "us-east-1"
-    # Prefer inference-profile ID for Nova (avoids on-demand unsupported errors).
     bedrock_model_id: str = "us.amazon.nova-pro-v1:0"
-
-    pdf_batch_size: int = 4
     max_upload_mb: int = 25
-    debug_json: bool = False
 
     runtime_dir: Path = Path("runtime")
     uploads_dir: Path = Path("runtime/uploads")
     generated_dir: Path = Path("runtime/generated")
-
-    logfire_token: str | None = None
-    logfire_service_name: str = "pdftoexl"
-    logfire_environment: str = "dev"
-    logfire_send_to_logfire: str = "if-token-present"
+    downloads_dir: Path = Path.home() / "Downloads"
 
 
 settings = Settings()

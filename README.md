@@ -1,65 +1,103 @@
-# PDF → Excel (FastAPI + Bedrock Nova)
+# PDF to Excel POC
 
-Upload a PDF form and download a cleaned Excel file with these columns:
+## Full PDF to Excel Pipeline
 
-- `Sequence`
-- `Section`
-- `Question Type`
-- `English Question/Index Text`
-- `English Answer Text`
+The current pipeline is staged and audit-friendly:
 
-The extraction uses **Amazon Bedrock** with **Amazon Nova** (default: Nova Pro).
+1. PDF to Markdown using the selected parser.
+2. Markdown semantic chunking.
+3. LLM hierarchical extraction.
+4. LLM refinement.
+5. Validation and review flags.
+6. Workbook row mapping.
+7. Deterministic Excel generation.
 
-## Requirements
+The frontend template remains unchanged. Uploading a PDF through the existing form now returns JSON with a Markdown preview, intermediate artifact paths, and an Excel download URL.
 
-- Python 3.10+
-- AWS credentials configured locally (for Bedrock)
+## Environment
 
-## Setup
+```env
+PDF_PARSER=docling
+OUTPUT_DIR=outputs
+DOWNLOADS_DIR=C:\Users\299778\Downloads
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_REGION=
+BEDROCK_MODEL_ID=
+
+LLM_PROVIDER=bedrock
+LLM_TEMPERATURE=0
+LLM_MAX_TOKENS=8192
 ```
 
-## Run
+Parsers can be switched through `.env`:
 
-```bash
-uvicorn app.main:app --reload
+- `docling`
+- `pdfplumber`
+- `pymupdf`
+
+Docling may require separate installation:
+
+```powershell
+.\venv\Scripts\python.exe -m pip install docling
 ```
 
-Open the app at `http://127.0.0.1:8000`.
+## Run App
 
-## Configuration (environment variables)
-
-- `AWS_REGION` (default: `us-east-1`)
-- `BEDROCK_MODEL_ID` (default: `us.amazon.nova-pro-v1:0`)
-- `PDF_BATCH_SIZE` (default: `4`)
-- `MAX_UPLOAD_MB` (default: `25`)
-- `DEBUG_JSON` (default: `0`)
-
-## Evals (quality + performance)
-
-This repo includes a small eval suite under `evals/` that compares the API output workbook to the expected golden `.xlsx` files in `docs/`.
-
-Notes:
-- `docs/` is listed in `.gitignore`, so evals will **skip** if you don't have the local fixtures.
-- The end-to-end eval calls `POST /extract`, which invokes Bedrock and may be slow/costly; it is **opt-in**.
-
-Run offline fixture/scoring checks (no AWS calls):
-
-```bash
-pytest evals
+```powershell
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+.\venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8010
 ```
 
-Run end-to-end API evals (uploads `docs/*.pdf` to `/extract` and compares returned `.xlsx` to golden workbooks):
+Open:
 
-```bash
-RUN_BEDROCK_EVAL=1 pytest evals -m bedrock -s
+```text
+http://127.0.0.1:8010
 ```
+
+## CLI
+
+PDF to Excel:
+
+```powershell
+.\venv\Scripts\python.exe scripts\run_pdf_to_excel.py --input samples\choices.pdf --parser docling
+```
+
+Markdown to Excel:
+
+```powershell
+.\venv\Scripts\python.exe scripts\run_markdown_to_excel.py --markdown outputs\markdowns\input.md
+```
+
+PDF to Markdown only:
+
+```powershell
+.\venv\Scripts\python.exe scripts\run_pdf_to_markdown.py --input samples\choices.pdf --parser pdfplumber --preview
+```
+
+## Outputs
+
+Intermediate audit files are saved under `OUTPUT_DIR`:
+
+- `markdowns/`
+- `chunks/`
+- `extraction/`
+- `validation/`
+- `workbook_rows/`
+- `review/`
+
+The final Excel workbook is saved under `DOWNLOADS_DIR`, using the uploaded PDF name:
+
+```text
+C:\Users\299778\Downloads\<pdf_name>_generated.xlsx
+```
+
+Review the validation issues and review report before using the generated workbook as final.
 
 ## Notes
 
-- Generated Excel files are stored temporarily on local disk under `runtime/generated/` and served via a download endpoint.
-- Uploads are stored under `runtime/uploads/` during processing.
+- The LLM must return schema-valid JSON and include source text/source pages.
+- Uncertain items are marked `needs_review=true`.
+- Excel generation does not use the LLM; it uses validated structured JSON only.
+- The system is designed to be auditable and reviewable, not perfect.
