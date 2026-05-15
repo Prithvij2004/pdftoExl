@@ -106,8 +106,7 @@ def dedupe_consecutive(rows: list[Row]) -> list[Row]:
 
 
 def dedupe_repeating_headers(rows: list[Row]) -> list[Row]:
-    """For multi-page forms with running headers (Applicant Name / SSN / DOB on every page),
-    keep only the first occurrence and mark Auto Populated = Yes on it."""
+    """For multi-page forms with running headers, keep only the first occurrence."""
     seen: dict[str, int] = {}
     out: list[Row] = []
     for r in rows:
@@ -117,8 +116,6 @@ def dedupe_repeating_headers(rows: list[Row]) -> list[Row]:
             if key in seen:
                 continue
             seen[key] = 1
-            if not r.auto_populated:
-                r.auto_populated = "Yes"
         out.append(r)
     return out
 
@@ -296,6 +293,7 @@ _CHOICE_QTYPES = {
     "dropdown",
     "drop down",
     "checkbox group",
+    "checkbox",
 }
 
 
@@ -331,6 +329,66 @@ def normalize_choice_options(rows: list[Row]) -> list[Row]:
         cleaned = [p.strip() for p in parts]
         cleaned = [p for p in cleaned if p]
         r.answer_text = "\n\n".join(cleaned)
+    return rows
+
+
+_VALIDATION_FRAGMENT_RE = re.compile(
+    r"^\s*("
+    r"default\s+characters?\s*=\s*\d+"
+    r"|format\s+is\s+[^;\n]+"
+    r"|signature\s+area"
+    r"|initials?\s+area"
+    r"|only\s+allow\s+[^;\n]+"
+    r"|numeric(?:\s+only)?"
+    r"|date\s+format\s+[^;\n]+"
+    r"|mm\s*/\s*dd\s*/\s*yyyy"
+    r"|\d+\s+characters?"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
+
+def _split_cell_lines(value: str) -> list[str]:
+    s = (value or "").replace("\r\n", "\n").replace("\r", "\n")
+    if "\n\n" in s:
+        parts = re.split(r"\n{2,}", s)
+    else:
+        parts = s.split("\n")
+    return [p.strip() for p in parts if p.strip()]
+
+
+def separate_answer_validation(rows: list[Row]) -> list[Row]:
+    """Keep selectable values in Answer Text and move input constraints to
+    Answer Validation.
+
+    This does not synthesize defaults. It only relocates validation-like text if the
+    model placed it in Answer Text, including mixed cells where options and hints were
+    emitted together on separate lines.
+    """
+    for r in rows:
+        answer = (r.answer_text or "").strip()
+        if not answer:
+            continue
+
+        parts = _split_cell_lines(answer)
+        if not parts:
+            continue
+
+        validation_parts: list[str] = []
+        answer_parts: list[str] = []
+        for part in parts:
+            if _VALIDATION_FRAGMENT_RE.match(part):
+                validation_parts.append(part)
+            else:
+                answer_parts.append(part)
+
+        if not validation_parts:
+            continue
+
+        existing = _split_cell_lines(r.answer_validation or "")
+        combined_validation = existing + [p for p in validation_parts if p not in existing]
+        r.answer_validation = "\n\n".join(combined_validation)
+        r.answer_text = "\n\n".join(answer_parts)
     return rows
 
 
@@ -857,6 +915,22 @@ def coerce_short_label_to_text_box(rows: list[Row]) -> list[Row]:
     return rows
 
 
+def coerce_yesno_to_radio_button(rows: list[Row]) -> list[Row]:
+    """Single Yes/No decisions should be Radio Buttons. Multi-select wording stays
+    Checkbox Group."""
+    for r in rows:
+        qt = (r.question_type or "").strip().lower()
+        if qt not in ("checkbox group", "checkbox", "dropdown", "drop down"):
+            continue
+        if _SELECT_ALL_RE.search(r.question_text or ""):
+            r.question_type = "Checkbox Group"
+            continue
+        ans_norm = re.sub(r"\s+", " ", (r.answer_text or "").strip().lower())
+        if ans_norm in ("yes no", "yes / no", "no yes"):
+            r.question_type = "Radio Button"
+    return rows
+
+
 def coerce_yesno_to_dropdown(rows: list[Row]) -> list[Row]:
     """A row whose answer_text is exactly 'Yes\\n\\nNo' (or 'Yes\\nNo' etc.) and which
     asks a single yes/no question is typically a Dropdown in the gold (TX LTSS) or
@@ -958,13 +1032,60 @@ def normalize_branching_yes_no(rows: list[Row]) -> list[Row]:
 
 
 _SELECT_ALL_RE = re.compile(
-    r"\b(check all that apply|select all that apply|all that apply|"
+    r"\b(check all|check all that apply|select all that apply|all that apply|"
     r"check and complete all that apply|mark all that apply)\b",
     re.IGNORECASE,
 )
 _SINGLE_ANSWER_HINT_RE = re.compile(
     r"\b(select one|choose one|pick one|select your)\b", re.IGNORECASE,
 )
+
+
+def coerce_select_all_choice_groups(rows: list[Row]) -> list[Row]:
+    """Prompts that explicitly allow multiple selections must be Checkbox Group,
+    even if the VLM called them Radio Button or Dropdown."""
+    for r in rows:
+        qt = (r.question_type or "").strip().lower()
+        if qt not in ("radio button", "dropdown", "drop down", "checkbox", "checkbox group"):
+            continue
+        if _SELECT_ALL_RE.search(r.question_text or ""):
+            r.question_type = "Checkbox Group"
+    return rows
+
+
+def _answer_is_yes_no(value: str) -> bool:
+    ans_norm = re.sub(r"\s+", " ", (value or "").strip().lower())
+    return ans_norm in ("yes no", "yes / no", "no yes")
+
+
+def flatten_yesno_layout_tables(rows: list[Row]) -> list[Row]:
+    """A table whose rows are independent statements with Yes/No choices is not an
+    answer grid. Keep the table title as Display and emit each statement as its own
+    Radio Button."""
+    for i, r in enumerate(rows):
+        if (r.question_type or "").strip().lower() != "group table":
+            continue
+        j = i + 1
+        yesno_children: list[Row] = []
+        while j < len(rows):
+            child = rows[j]
+            ctype = (child.question_type or "").strip().lower()
+            ctxt = (child.question_text or "").strip()
+            if ctype not in ("dropdown", "drop down", "checkbox group", "radio button", "checkbox"):
+                break
+            if not _answer_is_yes_no(child.answer_text):
+                break
+            if len(ctxt.split()) < 4:
+                break
+            yesno_children.append(child)
+            j += 1
+        if len(yesno_children) < 2:
+            continue
+        r.question_type = "Display"
+        r.answer_text = ""
+        for child in yesno_children:
+            child.question_type = "Radio Button"
+    return rows
 
 
 def _is_choice_prompt(r: Row) -> bool:
@@ -1003,7 +1124,11 @@ def _extract_specify_child(option_text: str) -> tuple[str, str]:
     m = _SPECIFY_TAIL_RE.search(option_text)
     if not m:
         # Strip the long underline tail anyway
-        return _QT_TAIL_RE.sub("", option_text).strip(), ""
+        cleaned = _QT_TAIL_RE.sub("", option_text).strip()
+        if _looks_like_attached_text_option(cleaned):
+            child_label = cleaned.rstrip(":").strip()
+            return child_label, child_label
+        return cleaned, ""
     cleaned = option_text[:m.start()].strip()
     cleaned = _QT_TAIL_RE.sub("", cleaned).strip()
     noun = (m.group(2) or "").strip().title()  # "relationship" -> "Relationship"
@@ -1014,6 +1139,66 @@ def _extract_specify_child(option_text: str) -> tuple[str, str]:
         last_word = cleaned.split()[-1].strip("(),:;.").title() if cleaned else "Other"
         child_label = f"Specify {last_word}" if last_word else "Specify"
     return cleaned, child_label
+
+
+def _looks_like_attached_text_option(option_text: str) -> bool:
+    """A short choice label ending in ':' usually marks a trailing free-text field
+    printed on the same line, e.g. a checkbox option followed by a write-in blank.
+    Keep this generic: no dependency on the option word itself."""
+    s = (option_text or "").strip()
+    if not s.endswith(":"):
+        return False
+    words = s.rstrip(":").split()
+    if not words or len(words) > 8:
+        return False
+    if any(ch in s for ch in "\n;"):
+        return False
+    return True
+
+
+def split_attached_text_options(rows: list[Row]) -> list[Row]:
+    """If a choice row's option list contains an option with an attached free-text
+    field marker, keep the clean option on the parent and add a child Text Box row
+    with deferred branching to that parent.
+
+    The final sequence is assigned later, so the child uses Q<PARENT_SEQ> until
+    resolve_pending_branching runs.
+    """
+    out: list[Row] = []
+    for r in rows:
+        qt = (r.question_type or "").strip().lower()
+        if qt not in ("radio button", "checkbox group", "dropdown", "drop down"):
+            out.append(r)
+            continue
+
+        parts = _split_cell_lines(r.answer_text or "")
+        if not parts:
+            out.append(r)
+            continue
+
+        cleaned_options: list[str] = []
+        children: list[Row] = []
+        for opt_text in parts:
+            cleaned, child_label = _extract_specify_child(opt_text)
+            if cleaned:
+                cleaned_options.append(cleaned)
+            if child_label:
+                child = Row(
+                    page=r.page,
+                    section=r.section,
+                    question_type="Text Box",
+                    question_text=child_label,
+                    branching_logic=f"Display if Q<PARENT_SEQ> = {cleaned}",
+                    confidence=r.confidence,
+                )
+                child.alt_question_text = "_pending_parent_idx=previous"
+                children.append(child)
+
+        if children:
+            r.answer_text = "\n\n".join(cleaned_options)
+        out.append(r)
+        out.extend(children)
+    return out
 
 
 def collapse_choice_groups(rows: list[Row]) -> list[Row]:
@@ -1068,7 +1253,6 @@ def collapse_choice_groups(rows: list[Row]) -> list[Row]:
                             section=r.section,
                             question_type="Text Box",
                             question_text=child_label,
-                            required="Yes",
                             branching_logic=f"Display if Q<PARENT_SEQ> = {cleaned}",
                             confidence=src.confidence,
                         ))
@@ -1099,8 +1283,8 @@ def split_header_band(rows: list[Row]) -> list[Row]:
     on one visual line (typical "Applicant Name: ___ SSN: ___ DOB: ___" running header),
     explode the row into N sibling Text Box rows, one per label.
 
-    Each is marked auto_populated='Yes' and prefixed with '(header)' to match the gold
-    convention. The original row's other fields are preserved on each split."""
+    Each is prefixed with '(header)' to match the target convention. The original row's
+    other extraction-scope fields are preserved on each split."""
     out: list[Row] = []
     for r in rows:
         txt = r.question_text or ""
@@ -1124,13 +1308,166 @@ def split_header_band(rows: list[Row]) -> list[Row]:
                     confidence=r.confidence,
                     question_text=f"(header) {label}",
                     question_type=qtype,
-                    auto_populated="Yes",
-                    required=r.required or "Yes",
                 )
                 out.append(clone)
         else:
             out.append(r)
     return out
+
+
+def _widget_text_key(value: str) -> str:
+    s = re.sub(r"\[[^\]]+\]$", "", value or "")
+    s = re.sub(r"\b\d+$", "", s)
+    s = re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+    return s
+
+
+def _token_overlap(a: str, b: str) -> float:
+    ta = {t for t in _widget_text_key(a).split() if len(t) > 2}
+    tb = {t for t in _widget_text_key(b).split() if len(t) > 2}
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / max(1, min(len(ta), len(tb)))
+
+
+def _text_widgets(doc_struct) -> list[dict]:
+    widgets: list[dict] = []
+    if doc_struct is None:
+        return widgets
+    for ps in getattr(doc_struct, "pages", []) or []:
+        for w in getattr(ps, "widgets", []) or []:
+            if str(w.get("type") or "").lower() != "text":
+                continue
+            rect = w.get("rect") or []
+            if len(rect) != 4:
+                continue
+            item = dict(w)
+            item["_page"] = ps.page_index + 1
+            item["_height"] = float(rect[3]) - float(rect[1])
+            item["_width"] = float(rect[2]) - float(rect[0])
+            item["_key"] = _widget_text_key(str(w.get("label") or w.get("name") or ""))
+            widgets.append(item)
+    return widgets
+
+
+def coerce_text_area_from_widget_layout(rows: list[Row], doc_struct=None) -> list[Row]:
+    """Upgrade Text Box to Text Area when AcroForm geometry shows a multi-line input
+    area. The signal is field shape, not label text."""
+    widgets = _text_widgets(doc_struct)
+    if not widgets:
+        return rows
+
+    heights = sorted(w["_height"] for w in widgets if w["_height"] > 0)
+    if not heights:
+        return rows
+    baseline_h = heights[max(0, (len(heights) - 1) // 2)]
+    area_threshold = max(baseline_h * 1.6, 28.0)
+
+    grouped: dict[tuple[int, str], list[dict]] = defaultdict(list)
+    for w in widgets:
+        if w["_key"]:
+            grouped[(w["_page"], w["_key"])].append(w)
+
+    multiline_keys: set[tuple[int, str]] = set()
+    for key, group in grouped.items():
+        if len(group) < 2:
+            continue
+        ordered = sorted(group, key=lambda g: (g["rect"][1], g["rect"][0]))
+        stacked = True
+        for a, b in zip(ordered, ordered[1:]):
+            ax0, ay0, ax1, ay1 = a["rect"]
+            bx0, by0, bx1, by1 = b["rect"]
+            overlap = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+            min_width = max(1.0, min(ax1 - ax0, bx1 - bx0))
+            gap = by0 - ay1
+            if overlap / min_width < 0.5 or gap < -2 or gap > baseline_h * 2.5:
+                stacked = False
+                break
+        if stacked:
+            multiline_keys.add(key)
+
+    for r in rows:
+        if (r.question_type or "").strip().lower() != "text box":
+            continue
+        label = r.question_text or ""
+        candidates = widgets
+        if r.page:
+            page_candidates = [w for w in widgets if w["_page"] == r.page]
+            if page_candidates:
+                candidates = page_candidates
+        best = None
+        best_score = 0.0
+        for w in candidates:
+            score = max(
+                _token_overlap(label, str(w.get("label") or "")),
+                _token_overlap(label, str(w.get("name") or "")),
+            )
+            if score > best_score:
+                best = w
+                best_score = score
+        if best is None or best_score < 0.5:
+            continue
+        if best["_height"] >= area_threshold or (best["_page"], best["_key"]) in multiline_keys:
+            r.question_type = "Text Area"
+    return rows
+
+
+_BRANCH_Q_RE = re.compile(r"^(display\s+if|if)\s+q(\d+)\s*=\s*(.+)$", re.IGNORECASE)
+
+
+def _choice_values(value: str) -> set[str]:
+    return {_normtext(p) for p in _split_cell_lines(value) if p.strip()}
+
+
+def repair_branching_reference_numbers(rows: list[Row]) -> list[Row]:
+    """Repair obvious stale Q references after final sequencing.
+
+    The model sometimes writes the right condition literal but points at an old page
+    number. We only repair when a nearer preceding parent has that literal and the
+    existing reference is impossible or implausibly far away.
+    """
+    seq_to_row = {r.sequence: r for r in rows if r.sequence is not None}
+    for i, r in enumerate(rows):
+        bl = (r.branching_logic or "").strip()
+        m = _BRANCH_Q_RE.match(bl)
+        if not m or r.sequence is None:
+            continue
+        prefix, ref_text, raw_value = m.groups()
+        try:
+            ref_seq = int(ref_text)
+        except ValueError:
+            continue
+        value = raw_value.strip()
+        value_key = _normtext(value)
+        is_checked = "checked" in value_key
+
+        current_section = (r.section or "").strip()
+        best_seq = None
+        for prev in reversed(rows[max(0, i - 12):i]):
+            if prev.sequence is None:
+                continue
+            if current_section and prev.section and prev.section != current_section:
+                continue
+            ptype = (prev.question_type or "").strip().lower()
+            if is_checked:
+                if ptype == "checkbox":
+                    best_seq = prev.sequence
+                    break
+                continue
+            if ptype not in ("radio button", "checkbox group", "dropdown", "drop down", "checkbox"):
+                continue
+            if value_key in _choice_values(prev.answer_text):
+                best_seq = prev.sequence
+                break
+
+        if best_seq is None or best_seq == ref_seq:
+            continue
+        impossible = ref_seq not in seq_to_row or ref_seq >= r.sequence
+        stale_far_ref = (r.sequence - ref_seq > 10) and (r.sequence - best_seq <= 6)
+        if impossible or stale_far_ref:
+            norm_prefix = "Display if" if prefix.lower().startswith("display") else "If"
+            r.branching_logic = f"{norm_prefix} Q{best_seq} = {value}"
+    return rows
 
 
 def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> list[Row]:
@@ -1143,6 +1480,11 @@ def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> 
     rows = merge_parenthetical_subnotes(rows)
     rows = merge_bullet_list_displays(rows)
     rows = collapse_choice_groups(rows)
+    rows = normalize_choice_options(rows)
+    rows = split_attached_text_options(rows)
+    rows = flatten_yesno_layout_tables(rows)
+    rows = coerce_select_all_choice_groups(rows)
+    rows = separate_answer_validation(rows)
     rows = dedupe_table_repetitions(rows)              # collapse 4× Falls table → 1
     rows = dedupe_repeating_headers(rows)
     rows = dedupe_unprefixed_header_aliases(rows)      # drop 'Applicant Name:' page-2 strays
@@ -1157,10 +1499,12 @@ def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> 
     rows = normalize_branching(rows)
     rows = normalize_branching_yes_no(rows)
     rows = coerce_short_label_to_text_box(rows)
-    rows = coerce_yesno_to_dropdown(rows)
+    rows = coerce_text_area_from_widget_layout(rows, doc_struct)
+    rows = coerce_select_all_choice_groups(rows)
+    rows = coerce_yesno_to_radio_button(rows)
     rows = coerce_group_table_child_to_text_box(rows)
     rows = resolve_checkbox_branching(rows)
     rows = normalize_choice_options(rows)
-    target_field = detect_answer_text_convention(truth_path)
-    rows = populate_answer_text_defaults(rows, target_field=target_field)
+    rows = separate_answer_validation(rows)
+    rows = repair_branching_reference_numbers(rows)
     return rows

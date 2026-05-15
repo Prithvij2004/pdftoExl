@@ -221,14 +221,24 @@ class Row(BaseModel):
 
 
 # JSON schema description handed to Qwen3-VL. Hand-written to be compact + clear.
-EXTRACTION_SCHEMA_DESCRIPTION = """
-Each question on the form becomes ONE JSON object with these keys (all strings unless noted):
+_LEGACY_EXTRACTION_SCHEMA_DESCRIPTION = """
+Each question on the form becomes ONE JSON object with ONLY these keys:
 
+  section            the section banner text this row belongs under, or "" for header rows
+                     before any section. Examples: "Current Living Arrangements",
+                     "Justification for Safety Determination Request:".
+  sequence           integer 1-based reading-order index. Include EVERY visible artifact
+                     (input widgets AND static instructional/legal text/section banners)
+                     because the gold encodes both.
   question_type      one of: Text Box, Text Area, Display, Checkbox, Checkbox Group,
                      Radio Button, Dropdown, Date, Calendar, Number, Signature,
                      Group Table, Section Header
   question_text      verbatim label from the PDF (preserve "(header)" prefix on running-header
                      fields like Applicant Name/SSN/DOB if present; keep multi-line text)
+  branching_logic    "" usually. Use "If Q<seq> = checked(selected)" when the question only
+                     appears if a prior Checkbox is ticked. Use "Display if Q<seq> = <literal>"
+                     when conditional on a Radio/Dropdown answer (literal must match an
+                     answer_text option of question seq <seq> verbatim).
   answer_text        for Choice types (Radio/Dropdown/Checkbox Group): options exactly
                      as printed, separated by "\\n\\n";
                      for the Display "New Section" rows: the section title;
@@ -345,4 +355,63 @@ trailing colon). Mark these with auto_populated = "Yes". Emit them ONCE (on page
 only) — DO NOT re-emit them on each page; the downstream system reuses the value.
 
 Output ONLY a JSON array. No markdown, no commentary. Each element follows the keys above.
+""".strip()
+
+# Current extraction scope for this step. Later configuration stages own all other
+# workbook columns such as required, alert, and auto-populate metadata.
+EXTRACTION_SCHEMA_DESCRIPTION = """
+Each question on the form becomes ONE JSON object with ONLY these keys:
+
+  section            the section banner text this row belongs under, or "" for header rows
+                     before any section. Examples: "Current Living Arrangements",
+                     "Justification for Safety Determination Request:".
+  sequence           integer 1-based reading-order index. Include EVERY visible artifact
+                     (input widgets AND static instructional/legal text/section banners)
+                     because the target workbook encodes both.
+  question_type      one of: Text Box, Text Area, Display, Checkbox, Checkbox Group,
+                     Radio Button, Dropdown, Date, Calendar, Number, Signature,
+                     Group Table, Section Header
+  question_text      verbatim label from the PDF. Keep multi-line text together.
+  branching_logic    "" usually. Use "If Q<seq> = checked(selected)" when the question only
+                     appears if a prior Checkbox is ticked. Use "Display if Q<seq> = <literal>"
+                     when conditional on a Radio/Dropdown answer.
+  answer_text        for Choice types: options exactly as printed, separated by "\\n\\n";
+                     for Display "New Section" rows: the section title;
+                     for Text Box / Text Area / Date / Calendar / Number / Signature:
+                     usually blank.
+  answer_validation  for Text Box / Text Area / Date / Calendar / Number / Signature
+                     only: format or input constraint text such as "default characters = 100",
+                     "default characters = 600", "Format is mm/dd/yyyy", numeric-only
+                     hints, or signature-area hints. Leave blank for selectable options.
+
+Use AcroForm widgets as the primary signal when they are present:
+  - Radio/checkbox widgets with one visible prompt and multiple options become one
+    Radio Button or Checkbox Group row, with options in answer_text.
+  - Wording like "check all" / "select all that apply" means Checkbox Group.
+  - A single Yes/No decision should be Radio Button, not Dropdown, unless the PDF
+    visibly uses a dropdown/select widget.
+  - A table of independent statement rows with Yes/No choices is not a Group Table;
+    emit each statement as its own Radio Button row. Use Group Table only for true
+    repeated data grids.
+  - If an option has an attached write-in text widget/blank on the same option line,
+    keep the clean option in the parent answer_text and emit a separate Text Box row
+    immediately after it with branching logic tied to that option.
+  - A tall text widget or stacked same-label text widgets indicate Text Area.
+
+Do NOT output or infer any other columns in this extraction step. In particular, do
+NOT output alert, required, auto-populated, pre-populate, history, score, token,
+notes, or auto-populate field/rule values. Those belong to a later manual or
+automated configuration step.
+
+A "New Section" boundary is encoded as a Display row whose question_text is exactly
+"New Section" and answer_text is the section title. Place it before the first row of
+that section.
+
+Static instructional paragraphs and legal-text blocks are also encoded as Display rows.
+
+For multi-page running headers like "Applicant Name: ____ SSN: ____ DOB: ____", emit
+one row per labelled blank once on the first page where it appears. Do not emit any
+auto-populate metadata for those rows.
+
+Output ONLY a JSON array. No markdown, no commentary.
 """.strip()

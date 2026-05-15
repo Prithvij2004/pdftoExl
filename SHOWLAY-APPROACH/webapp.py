@@ -34,7 +34,23 @@ from showlay.writer import write_workbook, write_review_sidecar
 
 
 ROOT = THIS.parent
-DEFAULT_TEMPLATE = ROOT / "SOURCE AND TARGET FILES" / "CHOICES Safety Determination Request Form Final_11_20 1.xlsx"
+
+
+def _resolve_default_template() -> Path:
+    candidates = [
+        ROOT / "docs" / "support_docs" / "CHOICES Safety Determination Request Form Final_11_20.xlsx",
+        ROOT / "SOURCE AND TARGET FILES" / "CHOICES Safety Determination Request Form Final_11_20 1.xlsx",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        "Could not find the default template workbook. Checked: "
+        + ", ".join(str(path) for path in candidates)
+    )
+
+
+DEFAULT_TEMPLATE = _resolve_default_template()
 UPLOAD_DIR = THIS / "runtime" / "uploads_web"
 OUTPUT_DIR = THIS / "runtime" / "output_web"
 IMG_DIR = THIS / "runtime" / "page_images_web"
@@ -711,7 +727,8 @@ function setStage(currentStage) {
     const k = el.dataset.key;
     const ki = stageOrder.indexOf(k);
     const ci = stageOrder.indexOf(currentStage);
-    const icon = el.querySelector('.stage-icon');
+    const icon = el.querySelector('.stage-dot');
+    if (!icon) return;
     el.classList.remove('active','done','error');
     if (ci > ki) { el.classList.add('done'); icon.textContent = '✓'; }
     else if (ci === ki) { el.classList.add('active'); icon.textContent = '●'; }

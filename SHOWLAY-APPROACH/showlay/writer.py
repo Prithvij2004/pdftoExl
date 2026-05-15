@@ -1,9 +1,10 @@
 """
 Excel writer.
 
-Strategy: copy the source TRUTH workbook as a template (preserves all metadata rows 1-12,
-formatting, validation, dropdowns), find the header row dynamically by scanning for
-"QuestionType" column header, then overwrite data rows starting at header_row+1.
+Strategy: copy the source workbook as a template (preserves formatting, validation,
+dropdowns, and label cells), find the header row dynamically by scanning for
+"QuestionType" column header, clear copied metadata values above that header, then
+overwrite data rows starting at header_row+1.
 
 Also writes a companion *_review.xlsx with 4 extra columns (Sequence, Confidence,
 Review Reasons, Page) sorted by confidence ascending — the human-review queue.
@@ -17,7 +18,7 @@ from openpyxl import load_workbook, Workbook
 from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
 
-from .schema import Row, COLUMNS_28, map_template_columns, FIELD_HEADER_ALIASES
+from .schema import Row, map_template_columns
 
 
 _GREEN = PatternFill(start_color="D6F5D6", end_color="D6F5D6", fill_type="solid")
@@ -26,6 +27,15 @@ _RED = PatternFill(start_color="FBD3D3", end_color="FBD3D3", fill_type="solid")
 
 
 _QTYPE_NAMES = {"questiontype", "question type"}
+OUTPUT_FIELDS = [
+    "section",
+    "sequence",
+    "question_type",
+    "question_text",
+    "branching_logic",
+    "answer_text",
+    "answer_validation",
+]
 
 
 def _find_header_row(ws) -> tuple[int, dict[str, int]]:
@@ -65,6 +75,27 @@ def _clear_data_rows(ws, header_row: int, max_col: int):
             ws.cell(row=r, column=c).fill = PatternFill(fill_type=None)
 
 
+def _is_metadata_label(value) -> bool:
+    return isinstance(value, str) and value.strip().endswith(":")
+
+
+def _clear_metadata_values(ws, header_row: int):
+    """Clear copied metadata values while keeping template labels and section headings.
+
+    Rows above the question table usually contain label/value pairs, for example
+    "Assessment Title:" followed by a value cell. We clear values only on rows
+    that contain at least one label, so standalone template headings remain intact.
+    """
+    for r in range(1, header_row):
+        row_values = [ws.cell(row=r, column=c).value for c in range(1, ws.max_column + 1)]
+        if not any(_is_metadata_label(value) for value in row_values):
+            continue
+        for c, value in enumerate(row_values, start=1):
+            if value in (None, "") or _is_metadata_label(value):
+                continue
+            ws.cell(row=r, column=c).value = None
+
+
 def write_workbook(template_path: str, out_path: str, rows: list[Row],
                    sheet_name: Optional[str] = None) -> str:
     """Clone template, find header row, write rows below it. Returns out_path."""
@@ -84,14 +115,12 @@ def write_workbook(template_path: str, out_path: str, rows: list[Row],
         raise ValueError("Template header row contained no recognized columns.")
 
     max_col_used = max(list(field_to_col.values()) + [ws.max_column])
+    _clear_metadata_values(ws, header_row)
     _clear_data_rows(ws, header_row, max_col_used)
-
-    field_order = list(FIELD_HEADER_ALIASES.keys())  # stable iteration
 
     for i, r in enumerate(rows, start=1):
         ws_row = header_row + i
-        fill = _confidence_fill(r.confidence)
-        for fname in field_order:
+        for fname in OUTPUT_FIELDS:
             cidx = field_to_col.get(fname)
             if cidx is None:
                 continue
@@ -100,8 +129,6 @@ def write_workbook(template_path: str, out_path: str, rows: list[Row],
                 value = value if value is not None else ""
             cell = ws.cell(row=ws_row, column=cidx)
             cell.value = value
-            if fill:
-                cell.fill = fill
             cell.alignment = Alignment(wrap_text=True, vertical="top")
 
     wb.save(out_path)
@@ -115,8 +142,7 @@ def write_review_sidecar(out_path: str, rows: list[Row]) -> str:
     ws = wb.active
     ws.title = "Review Queue"
     headers = ["Confidence", "Page", "Sequence", "QuestionType", "Question Text",
-               "Section", "Answer Text", "Branching Logic", "Required",
-               "Review Reasons"]
+               "Section", "Answer Text", "Answer Validation", "Branching Logic", "Review Reasons"]
     for c, h in enumerate(headers, start=1):
         cell = ws.cell(row=1, column=c, value=h)
         cell.font = Font(bold=True)
@@ -130,15 +156,15 @@ def write_review_sidecar(out_path: str, rows: list[Row]) -> str:
         ws.cell(row=i, column=5, value=r.question_text)
         ws.cell(row=i, column=6, value=r.section)
         ws.cell(row=i, column=7, value=r.answer_text)
-        ws.cell(row=i, column=8, value=r.branching_logic)
-        ws.cell(row=i, column=9, value=r.required)
+        ws.cell(row=i, column=8, value=r.answer_validation)
+        ws.cell(row=i, column=9, value=r.branching_logic)
         ws.cell(row=i, column=10, value="; ".join(r.review_reasons))
         fill = _confidence_fill(r.confidence)
         if fill:
             for c in range(1, len(headers) + 1):
                 ws.cell(row=i, column=c).fill = fill
 
-    for c, w in enumerate([10, 6, 9, 14, 60, 22, 40, 28, 9, 40], start=1):
+    for c, w in enumerate([10, 6, 9, 14, 60, 22, 40, 28, 28, 40], start=1):
         ws.column_dimensions[get_column_letter(c)].width = w
     ws.row_dimensions[1].height = 22
     wb.save(out_path)

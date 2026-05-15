@@ -212,33 +212,12 @@ def extract_document(doc_struct: DocStructure, model_id: str, verbose: bool = Tr
 
 _VLM_KEY_TO_ROW_FIELD = {
     "section": "section",
-    "alert": "alert",
-    "alternate_text": "alternate_text",
-    "auto_populated": "auto_populated",
-    "history": "history",
-    "pre_populate": "pre_populate",
-    "required": "required",
-    "speech_to_text": "speech_to_text",
-    "submission_history": "submission_history",
-    "concept_code": "concept_code",
     "sequence": "sequence",
-    "question_rule": "question_rule",
     "question_type": "question_type",
     "question_text": "question_text",
     "branching_logic": "branching_logic",
     "answer_text": "answer_text",
     "answer_validation": "answer_validation",
-    "answer_score_value": "answer_score_value",
-    "talking_points": "talking_points",
-    "auto_populate_with": "auto_populate_with",
-    "auto_populate_field": "auto_populate_field",
-    "auto_populate_rule": "auto_populate_rule",
-    "alt_question_text": "alt_question_text",
-    "alt_answer_text": "alt_answer_text",
-    "alert_type": "alert_type",
-    "alert_text": "alert_text",
-    "token_id": "token_id",
-    "it_notes": "it_notes",
 }
 
 
