@@ -80,7 +80,6 @@ QUESTION_TYPES = [
     "Dropdown",
     "Drop Down",
     "Date",
-    "Calendar",
     "Number",
     "Signature",
     "Group Table",
@@ -231,7 +230,7 @@ Each question on the form becomes ONE JSON object with ONLY these keys:
                      (input widgets AND static instructional/legal text/section banners)
                      because the gold encodes both.
   question_type      one of: Text Box, Text Area, Display, Checkbox, Checkbox Group,
-                     Radio Button, Dropdown, Date, Calendar, Number, Signature,
+                     Radio Button, Dropdown, Date, Number, Signature,
                      Group Table, Section Header
   question_text      verbatim label from the PDF (preserve "(header)" prefix on running-header
                      fields like Applicant Name/SSN/DOB if present; keep multi-line text)
@@ -243,13 +242,13 @@ Each question on the form becomes ONE JSON object with ONLY these keys:
                      as printed, separated by "\\n\\n";
                      for the Display "New Section" rows: the section title;
                      for plain Display paragraphs: usually the same paragraph text
-                     (mirror of question_text) OR blank — match what the form expects;
-                     for Text Box / Text Area / Date / Calendar / Number / Signature:
+                     (mirror of question_text) OR blank - match what the form expects;
+                     for Text Box / Text Area / Date / Number / Signature:
                      LEAVE BLANK unless the PDF visually shows a hint string (e.g., a
-                     watermark "mm/dd/yyyy" beside the field) — do NOT invent values
+                     watermark "mm/dd/yyyy" beside the field) - do NOT invent values
                      like "Signature area" or "default characters = 100" without visual
                      evidence. The downstream config layer fills validation later.
-  required           "Yes", "No", or "" — blank is allowed and DIFFERENT from "No"
+  required           "Yes", "No", or "" - blank is allowed and DIFFERENT from "No"
                      (use "" for conditionally-shown rows whose required-ness depends on parent)
   section            the section banner text this row belongs under, or "" for header rows
                      before any section. Examples: "Current Living Arrangements",
@@ -274,11 +273,11 @@ Static instructional paragraphs and legal-text blocks are also encoded as Displa
 (question_text = the paragraph text, answer_text = "" or "No answers displayed").
 
 A multi-row table on the PDF (e.g. "Recent hospital admissions" with columns Admit Date /
-Discharge Date / Reason) is a "Group Table" parent row followed by N child rows — one per
-COLUMN of the table — each with its own question_type (Date, Text Box, etc.) and
+Discharge Date / Reason) is a "Group Table" parent row followed by N child rows - one per
+COLUMN of the table - each with its own question_type (Date, Text Box, etc.) and
 question_text equal to the column header.
 
-==== STRICT EXCLUSIONS — DO NOT EMIT ROWS FOR ANY OF THESE ====
+==== STRICT EXCLUSIONS - DO NOT EMIT ROWS FOR ANY OF THESE ====
 
 1. Page CHROME: form titles repeated in a banner, agency names ("TN Division of Health
    Care Finance & Administration"), form IDs ("TC0175 (Rev. 8-2-16)"), regulatory codes
@@ -302,57 +301,56 @@ question_text equal to the column header.
 6. Question splitting: a multi-line question or paragraph is ONE row. Do NOT split a
    single labeled question into two Display rows just because the text wraps.
 
-==== TYPE DISAMBIGUATION (READ CAREFULLY — GLYPH ALONE IS NOT THE SIGNAL) ====
+==== TYPE DISAMBIGUATION (READ CAREFULLY - GLYPH ALONE IS NOT THE SIGNAL) ====
 
-A list of options preceded by box glyphs (☐, , o, ▢) is NOT automatically Checkbox.
+A list of options preceded by box glyphs is NOT automatically Checkbox.
 The semantics of the QUESTION PROMPT decide:
 
-  • If the prompt asks for ONE answer (e.g., "Applicant residence (if applicant
-    currently resides in a NF, housing status prior to admission):" — there is
+  - If the prompt asks for ONE answer (e.g., "Applicant residence (if applicant
+    currently resides in a NF, housing status prior to admission):" - there is
     exactly one residence; or "Sex:" / "Gender:" / "Choose one:" / a single noun
     asking for one value):
-        → emit ONE row of question_type = "Radio Button" (or "Dropdown" if the
+        -> emit ONE row of question_type = "Radio Button" (or "Dropdown" if the
           options are short and look like a Yes/No/short menu).
-        → answer_text = the option labels joined by EXACTLY "\n\n".
-        → DO NOT emit each option as its own Checkbox row.
+        -> answer_text = the option labels joined by EXACTLY "\\n\\n".
+        -> DO NOT emit each option as its own Checkbox row.
 
-  • If the prompt explicitly says "check all that apply" or "select all that apply"
+  - If the prompt explicitly says "check all that apply" or "select all that apply"
     or "(check and complete all that apply)" or similar multi-select wording:
-        → emit ONE row of question_type = "Checkbox Group".
-        → answer_text = the option labels joined by EXACTLY "\n\n".
-        → DO NOT emit each option as its own Checkbox row.
+        -> emit ONE row of question_type = "Checkbox Group".
+        -> answer_text = the option labels joined by EXACTLY "\\n\\n".
+        -> DO NOT emit each option as its own Checkbox row.
 
-  • If a single standalone box-glyph precedes a single sentence/declaration with
+  - If a single standalone box-glyph precedes a single sentence/declaration with
     NO peer options (e.g., a list of 8 attestation statements where each is its
-    own checkable claim — pages 7–8 of safety forms):
-        → emit one Checkbox row per box, question_text = the sentence text,
+    own checkable claim - pages 7-8 of safety forms):
+        -> emit one Checkbox row per box, question_text = the sentence text,
           answer_text = "".
 
-  • If an option in a Radio Button / Checkbox Group has a trailing
-    "— specify _____" / "— please specify _____" tail, that becomes a CHILD
+  - If an option in a Radio Button / Checkbox Group has a trailing
+    "- specify _____" / "- please specify _____" tail, that becomes a CHILD
     Text Box row in addition to keeping the option in the parent's answer_text.
     The child row has question_text like "Specify Relationship" or "Specify Other"
     and branching_logic = "Display if Q<seq> = <option literal>".
 
 OTHER TYPE RULES:
-  • Underline `____` after a single label  →  Text Box
-  • Multiple long underlined lines / a tall blank box  →  Text Area
-  • A blank labelled "Date" / "DOB" / "Begin Date" / "End Date" / "Revision Date"
-    / a mm/dd/yyyy hint  →  Date (use Calendar specifically for plan-period dates
-    like "Begin Date", "End Date", "Revision Date", and signature-block date-pickers).
-  • Numeric-only blank ("Acuity Score: __", "Total Score: __", numeric
-    questionnaire response)  →  Number  (NOT Text Box).
-  • Signature line  →  Signature
+  - Underline `____` after a single label  ->  Text Box
+  - Multiple long underlined lines / a tall blank box  ->  Text Area
+  - A blank labelled "Date" / "DOB" / "Begin Date" / "End Date" / "Revision Date"
+    / a mm/dd/yyyy hint  ->  Date.
+  - Numeric-only blank ("Acuity Score: __", "Total Score: __", numeric
+    questionnaire response)  ->  Number  (NOT Text Box).
+  - Signature line  ->  Signature
 
 ==== HEADER BANDS (multi-page running headers) ====
 
 If the very top of a multi-page form has a horizontal band like
    "Applicant Name: __________ SSN: __________ DOB: __________"
 that is THREE separate questions on one visual line, NOT one Display row.
-Emit THREE rows — one per labelled blank — with question_text "(header) Applicant
+Emit THREE rows - one per labelled blank - with question_text "(header) Applicant
 Name:", "(header) SSN:", "(header) DOB:" (preserve the "(header)" prefix and the
 trailing colon). Mark these with auto_populated = "Yes". Emit them ONCE (on page 1
-only) — DO NOT re-emit them on each page; the downstream system reuses the value.
+only) - DO NOT re-emit them on each page; the downstream system reuses the value.
 
 Output ONLY a JSON array. No markdown, no commentary. Each element follows the keys above.
 """.strip()
@@ -369,7 +367,7 @@ Each question on the form becomes ONE JSON object with ONLY these keys:
                      (input widgets AND static instructional/legal text/section banners)
                      because the target workbook encodes both.
   question_type      one of: Text Box, Text Area, Display, Checkbox, Checkbox Group,
-                     Radio Button, Dropdown, Date, Calendar, Number, Signature,
+                     Radio Button, Dropdown, Date, Number, Signature,
                      Group Table, Section Header
   question_text      verbatim label from the PDF. Keep multi-line text together.
   branching_logic    "" usually. Use "If Q<seq> = checked(selected)" when the question only
@@ -377,9 +375,9 @@ Each question on the form becomes ONE JSON object with ONLY these keys:
                      when conditional on a Radio/Dropdown answer.
   answer_text        for Choice types: options exactly as printed, separated by "\\n\\n";
                      for Display "New Section" rows: the section title;
-                     for Text Box / Text Area / Date / Calendar / Number / Signature:
+                     for Text Box / Text Area / Date / Number / Signature:
                      usually blank.
-  answer_validation  for Text Box / Text Area / Date / Calendar / Number / Signature
+  answer_validation  for Text Box / Text Area / Date / Number / Signature
                      only: format or input constraint text such as "default characters = 100",
                      "default characters = 600", "Format is mm/dd/yyyy", numeric-only
                      hints, or signature-area hints. Leave blank for selectable options.
@@ -397,6 +395,9 @@ Use AcroForm widgets as the primary signal when they are present:
     keep the clean option in the parent answer_text and emit a separate Text Box row
     immediately after it with branching logic tied to that option.
   - A tall text widget or stacked same-label text widgets indicate Text Area.
+  - Do not combine a parent decision and its dependent follow-up controls into one
+    Answer Text list. Emit the parent as its own row, then emit each dependent prompt
+    as its own child row with branching logic tied to the parent answer.
 
 Do NOT output or infer any other columns in this extraction step. In particular, do
 NOT output alert, required, auto-populated, pre-populate, history, score, token,
