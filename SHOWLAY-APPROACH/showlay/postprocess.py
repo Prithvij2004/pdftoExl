@@ -23,6 +23,27 @@ def _normtext(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip().lower())[:100]
 
 
+def _full_normtext(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+
+def _strip_fill_marks(s: str) -> str:
+    s = re.sub(r"[_]{3,}.*?$", "", s or "")
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _chrome_key(s: str) -> str:
+    """Normalize page-band text so repeated headers/footers can be detected without
+    knowing the form title. Page numbers and fill-lines are unstable; the remaining
+    words are the recurrence signal."""
+    s = _strip_fill_marks(s)
+    s = re.sub(r"^\s*\d+\s+", "", s)
+    s = re.sub(r"\s+\d+\s*$", "", s)
+    s = re.sub(r"\bpage\s+\d+(\s+of\s+\d+)?\b", "page", s, flags=re.IGNORECASE)
+    s = re.sub(r"[^a-z0-9:/& ]+", " ", s.lower())
+    return re.sub(r"\s+", " ", s).strip()
+
+
 _CHROME_TEXT_RE = re.compile(
     r"^("
     r"safety determination request form|"
@@ -87,6 +108,75 @@ def drop_chrome(rows: list[Row], min_recur_pages: int = 3) -> list[Row]:
                     drop_idx.add(k)
 
     return [r for i, r in enumerate(rows) if i not in drop_idx]
+
+
+def _repeated_page_band_keys(doc_struct=None, min_recur_pages: int = 3) -> tuple[set[str], set[str]]:
+    """Return repeated top/bottom line keys and repeated top-band field labels.
+
+    This uses layout position and recurrence, not form-specific wording. It catches
+    running titles, page-numbered titles, and repeated header bands like
+    "Name: ____ ID: ____ DOB: ____" across many pages.
+    """
+    line_pages: dict[str, set[int]] = defaultdict(set)
+    field_pages: dict[str, set[int]] = defaultdict(set)
+    if doc_struct is None:
+        return set(), set()
+    page_count = int(getattr(doc_struct, "page_count", 0) or 0)
+    min_pages = min(min_recur_pages, max(2, page_count // 2)) if page_count else min_recur_pages
+
+    for ps in getattr(doc_struct, "pages", []) or []:
+        page_no = int(getattr(ps, "page_index", 0) or 0) + 1
+        height = float(getattr(ps, "height", 0) or 0)
+        if not height:
+            continue
+        for tb in getattr(ps, "text_blocks", []) or []:
+            rect = tb.get("rect") or []
+            if len(rect) != 4:
+                continue
+            y0 = float(rect[1])
+            text = str(tb.get("text") or "").strip()
+            if not text:
+                continue
+            in_band = y0 <= height * 0.18 or y0 >= height * 0.88
+            if not in_band:
+                continue
+            key = _chrome_key(text)
+            if len(key) >= 5:
+                line_pages[key].add(page_no)
+            for label in re.findall(r"([A-Za-z][A-Za-z 0-9/&]{1,45}?:)\s*_{3,}", text):
+                field_pages[_strip_for_dedup(label)].add(page_no)
+
+    repeated_lines = {k for k, pages in line_pages.items() if len(pages) >= min_pages}
+    repeated_fields = {k for k, pages in field_pages.items() if len(pages) >= min_pages}
+    return repeated_lines, repeated_fields
+
+
+def drop_repeated_page_bands(rows: list[Row], doc_struct=None, min_recur_pages: int = 3) -> list[Row]:
+    """Drop repeated top/bottom page-band rows using layout recurrence.
+
+    Unlike the older explicit chrome regex, this works for new forms because the
+    signal is repeated page position. Repeated field labels are emitted once, then
+    later copies are dropped.
+    """
+    repeated_lines, repeated_fields = _repeated_page_band_keys(doc_struct, min_recur_pages)
+    if not repeated_lines and not repeated_fields:
+        return rows
+
+    seen_fields: set[str] = set()
+    out: list[Row] = []
+    for r in rows:
+        txt = (r.question_text or "").strip()
+        qt = (r.question_type or "").strip().lower()
+        key = _chrome_key(txt)
+        if key in repeated_lines and qt == "display":
+            continue
+        field_key = _strip_for_dedup(_HEADER_PREFIX_RE.sub("", txt))
+        if field_key in repeated_fields and qt in ("text box", "date", "number"):
+            if field_key in seen_fields:
+                continue
+            seen_fields.add(field_key)
+        out.append(r)
+    return out
 
 
 def dedupe_consecutive(rows: list[Row]) -> list[Row]:
@@ -530,6 +620,29 @@ def coerce_text_area_for_bullet_prompts(rows: list[Row]) -> list[Row]:
     return rows
 
 
+def coerce_static_instruction_rows(rows: list[Row]) -> list[Row]:
+    """Instruction rows that introduce structured fields below should be Display,
+    not answer inputs. This is structural: an imperative line with a 'below' cue
+    followed by table/input rows in the same local block."""
+    for i, r in enumerate(rows):
+        qt = (r.question_type or "").strip().lower()
+        if qt not in ("display", "text area", "checkbox"):
+            continue
+        txt = (r.question_text or "").strip()
+        low = txt.lower()
+        if "below" not in low or not _TEXT_AREA_VERBS_RE.match(txt):
+            continue
+        for nxt in rows[i + 1:min(len(rows), i + 5)]:
+            nt = (nxt.question_type or "").strip().lower()
+            if nt in ("group table", "text box", "date", "number", "radio button", "checkbox group"):
+                r.question_type = "Display"
+                r.answer_text = ""
+                break
+            if nt == "display" and (nxt.question_text or "").strip().lower() == "new section":
+                break
+    return rows
+
+
 def normalize_section_header_type(rows: list[Row]) -> list[Row]:
     """Some VLM outputs emit 'Section Header' as a question_type. Truth gold uses
     Display rows whose question_text='New Section' and answer_text=section title.
@@ -629,31 +742,6 @@ def sparsify_section(rows: list[Row]) -> list[Row]:
             r.section = ""
         else:
             last_section = cur
-    return rows
-
-
-_DESC_DOC_ATTACHED_RE = re.compile(r"description of documentation attached", re.IGNORECASE)
-
-
-def force_text_box_for_description_attached(rows: list[Row]) -> list[Row]:
-    """Restore the pre-cleanup behavior for documentation-attachment rows."""
-    for r in rows:
-        if _DESC_DOC_ATTACHED_RE.search(r.question_text or ""):
-            r.question_type = "Text Box"
-            r.question_text = "Description of documentation attached:"
-    return rows
-
-
-_FORCE_DISPLAY_LABEL_RE = re.compile(
-    r"^document below and (provide|attach)", re.IGNORECASE,
-)
-
-
-def force_display_for_document_below(rows: list[Row]) -> list[Row]:
-    """Restore the pre-cleanup behavior for static document-instruction rows."""
-    for r in rows:
-        if _FORCE_DISPLAY_LABEL_RE.match((r.question_text or "").strip()):
-            r.question_type = "Display"
     return rows
 
 
@@ -873,6 +961,12 @@ def coerce_short_label_to_text_box(rows: list[Row]) -> list[Row]:
         txt = (r.question_text or "").strip()
         if not txt or "\n" in txt:
             continue
+        m = re.search(r"(\d+)\s*(?:default\s*)?characters?|default\s+characters?\s*=\s*(\d+)",
+                      r.answer_validation or "", flags=re.IGNORECASE)
+        if m:
+            limit = int(next(g for g in m.groups() if g))
+            if limit >= 400:
+                continue
         # Don't downgrade verb-led prompts (those ARE Text Area)
         if _TEXT_AREA_VERBS_RE.match(txt):
             continue
@@ -1017,6 +1111,25 @@ def coerce_select_all_choice_groups(rows: list[Row]) -> list[Row]:
     return rows
 
 
+def coerce_question_choice_groups_to_radio(rows: list[Row]) -> list[Row]:
+    """A question-style prompt with a compact option list usually represents one
+    answer, even if the glyphs looked like checkboxes. Explicit select-all wording
+    remains Checkbox Group."""
+    for r in rows:
+        qt = (r.question_type or "").strip().lower()
+        if qt != "checkbox group":
+            continue
+        question = (r.question_text or "").strip()
+        if not question.endswith("?"):
+            continue
+        if _SELECT_ALL_RE.search(question):
+            continue
+        options = _split_cell_lines(r.answer_text or "")
+        if 2 <= len(options) <= 6 and all(_is_short_option_value(o) for o in options):
+            r.question_type = "Radio Button"
+    return rows
+
+
 def _answer_is_yes_no(value: str) -> bool:
     ans_norm = re.sub(r"\s+", " ", (value or "").strip().lower())
     return ans_norm in ("yes no", "yes / no", "no yes")
@@ -1049,6 +1162,29 @@ def _is_short_option_value(value: str) -> bool:
     if _is_prompt_like_option(s):
         return False
     return len(s.split()) <= 5 and len(s) <= 45
+
+
+def _split_embedded_conditional_options(options: list[str]) -> list[str]:
+    """Split cells like "No  If yes, # days per week" into two logical parts.
+
+    The condition literal is still validated later against the parent options, so
+    this does not assume a particular answer vocabulary.
+    """
+    out: list[str] = []
+    for opt in options:
+        s = (opt or "").strip()
+        m = re.search(r"\s+(if|when)\s+([A-Za-z][A-Za-z /-]{0,40})(?=[,;:?]|\s)", s, flags=re.IGNORECASE)
+        if not m:
+            out.append(s)
+            continue
+        prefix = s[:m.start()].strip()
+        conditional = s[m.start():].strip()
+        if prefix and len(prefix.split()) <= 5 and len(prefix) <= 45:
+            out.append(prefix)
+            out.append(conditional)
+        else:
+            out.append(s)
+    return [p for p in out if p]
 
 
 def _condition_from_prompt_text(value: str, option_map: dict[str, str] | None = None) -> str:
@@ -1098,7 +1234,7 @@ def split_compound_choice_rows(rows: list[Row]) -> list[Row]:
             out.append(r)
             continue
 
-        options = _split_cell_lines(r.answer_text or "")
+        options = _split_embedded_conditional_options(_split_cell_lines(r.answer_text or ""))
         if len(options) < 5:
             out.append(r)
             continue
@@ -1203,6 +1339,12 @@ _SPECIFY_TAIL_RE = re.compile(
 )
 
 
+_SPECIFY_TAIL_RE = re.compile(
+    r"\s*(?:[-\u2013\u2014]|â€”|â€“)+\s*(specify|please specify)(?:\s+([A-Za-z][A-Za-z ]{0,30}))?\s*[_]*\s*$",
+    re.IGNORECASE,
+)
+
+
 def _extract_specify_child(option_text: str) -> tuple[str, str]:
     """If an option label has a trailing ' — specify <noun> ____', return
     (clean_option_without_tail, child_text_box_label). Else (option, '').
@@ -1215,13 +1357,13 @@ def _extract_specify_child(option_text: str) -> tuple[str, str]:
     m = _SPECIFY_TAIL_RE.search(option_text)
     if not m:
         # Strip the long underline tail anyway
-        cleaned = _QT_TAIL_RE.sub("", option_text).strip()
+        cleaned = _QT_TAIL_RE.sub("", option_text).strip().rstrip("-–—").strip()
         if _looks_like_attached_text_option(cleaned):
             child_label = cleaned.rstrip(":").strip()
             return child_label, child_label
         return cleaned, ""
     cleaned = option_text[:m.start()].strip()
-    cleaned = _QT_TAIL_RE.sub("", cleaned).strip()
+    cleaned = _QT_TAIL_RE.sub("", cleaned).strip().rstrip("-–—").strip()
     noun = (m.group(2) or "").strip().title()  # "relationship" -> "Relationship"
     if noun:
         child_label = f"Specify {noun}"
@@ -1293,7 +1435,9 @@ def split_attached_text_options(rows: list[Row]) -> list[Row]:
 
 
 def _clean_attached_label(value: str) -> str:
-    s = _QT_TAIL_RE.sub("", value or "")
+    _, child_label = _extract_specify_child(value or "")
+    s = child_label or value or ""
+    s = _QT_TAIL_RE.sub("", s)
     s = re.sub(r"\b(specify|please specify)\b", "", s, flags=re.IGNORECASE)
     s = s.strip().rstrip(":").strip()
     return _normtext(s)
@@ -1360,6 +1504,117 @@ def branch_existing_attached_text_children(rows: list[Row]) -> list[Row]:
             if option:
                 child.branching_logic = f"Display if Q{parent.sequence} = {option}"
     return rows
+
+
+def _looks_like_short_choice_option(row: Row) -> bool:
+    if (row.question_type or "").strip().lower() != "checkbox":
+        return False
+    txt = (row.question_text or "").strip()
+    if not txt or "\n" in txt:
+        return False
+    if txt.endswith("?"):
+        return False
+    if _TEXT_AREA_VERBS_RE.match(txt):
+        return False
+    words = txt.split()
+    return len(words) <= 12 and len(txt) <= 120
+
+
+def _same_attached_option_label(child: Row, option: str) -> bool:
+    child_label = _clean_attached_label(child.question_text)
+    option_label = _clean_attached_label(option)
+    return bool(child_label and option_label and child_label == option_label)
+
+
+def absorb_orphan_checkbox_options(rows: list[Row]) -> list[Row]:
+    """Merge short orphan Checkbox option rows back into the nearest preceding
+    choice parent.
+
+    This fixes cases where the VLM starts a Radio/Checkbox Group correctly but then
+    emits later peer options as standalone Checkbox rows, often because a write-in
+    child row interrupted the option run. The rule is structural: short checkbox
+    labels adjacent to a choice parent are options; long statement checkboxes stay
+    standalone.
+    """
+    out: list[Row] = []
+    i = 0
+    n = len(rows)
+    while i < n:
+        parent = rows[i]
+        ptype = (parent.question_type or "").strip().lower()
+        if ptype not in ("radio button", "checkbox group", "dropdown", "drop down") or not (parent.answer_text or "").strip():
+            out.append(parent)
+            i += 1
+            continue
+
+        out.append(parent)
+        option_values = _split_cell_lines(parent.answer_text or "")
+        children: list[Row] = []
+        j = i + 1
+        absorbed_any = False
+        while j < n:
+            row = rows[j]
+            qt = (row.question_type or "").strip().lower()
+            if _is_text_input_row(row):
+                existing_branch = (row.branching_logic or "").strip().lower()
+                if "<parent_seq>" in existing_branch or existing_branch.startswith("display if "):
+                    children.append(row)
+                    j += 1
+                    continue
+                # Keep existing write-in children. If they duplicate an option already
+                # attached to the parent, make sure the branch is parent-option based.
+                label = _clean_attached_label(row.question_text)
+                option_map = {_clean_attached_label(o): o for o in option_values if _clean_attached_label(o)}
+                if label in option_map:
+                    if not (row.branching_logic or "").strip() or "checked(selected)" in (row.branching_logic or "").lower():
+                        row.branching_logic = f"Display if Q<PARENT_SEQ> = {option_map[label]}"
+                    _, normalized_child_label = _extract_specify_child(row.question_text or "")
+                    if normalized_child_label:
+                        row.question_text = normalized_child_label
+                    children.append(row)
+                    j += 1
+                    continue
+                # A non-option input means the option block is over.
+                break
+            if not _looks_like_short_choice_option(row):
+                break
+
+            cleaned, child_label = _extract_specify_child(row.question_text or "")
+            if cleaned:
+                option_values.append(cleaned)
+                absorbed_any = True
+
+            # If the model already emitted the write-in row immediately after this
+            # checkbox option, reuse it instead of creating a duplicate.
+            used_existing_child = False
+            if j + 1 < n and _is_text_input_row(rows[j + 1]) and _same_attached_option_label(rows[j + 1], row.question_text or ""):
+                child = rows[j + 1]
+                child.branching_logic = f"Display if Q<PARENT_SEQ> = {cleaned}"
+                if child_label:
+                    child.question_text = child_label
+                children.append(child)
+                used_existing_child = True
+                j += 2
+            else:
+                j += 1
+
+            if child_label and not used_existing_child:
+                children.append(Row(
+                    page=row.page,
+                    section=parent.section,
+                    question_type="Text Box",
+                    question_text=child_label,
+                    branching_logic=f"Display if Q<PARENT_SEQ> = {cleaned}",
+                    confidence=row.confidence,
+                ))
+
+        if absorbed_any:
+            parent.answer_text = "\n\n".join(o for o in option_values if o)
+            out.extend(children)
+            i = j
+            continue
+        i += 1
+    return out
 
 
 def collapse_choice_groups(rows: list[Row]) -> list[Row]:
@@ -1512,8 +1767,11 @@ def _text_widgets(doc_struct) -> list[dict]:
 
 
 def coerce_text_area_from_widget_layout(rows: list[Row], doc_struct=None) -> list[Row]:
-    """Upgrade Text Box to Text Area when AcroForm geometry shows a multi-line input
-    area. The signal is field shape, not label text."""
+    """Use AcroForm geometry to choose Text Box vs Text Area.
+
+    The signal is field shape, not label text: tall or stacked text widgets are
+    Text Area; ordinary single-line widgets are Text Box.
+    """
     widgets = _text_widgets(doc_struct)
     if not widgets:
         return rows
@@ -1568,14 +1826,29 @@ def coerce_text_area_from_widget_layout(rows: list[Row], doc_struct=None) -> lis
                 best_score = score
         if best is None or best_score < 0.5:
             continue
-        if best["_height"] >= area_threshold or (best["_page"], best["_key"]) in multiline_keys:
+        is_multiline = best["_height"] >= area_threshold or (best["_page"], best["_key"]) in multiline_keys
+        if is_multiline:
             r.question_type = "Text Area"
+        elif (r.question_type or "").strip().lower() == "text area":
+            r.question_type = "Text Box"
     return rows
+
+
+def _looks_like_narrative_prompt(text: str) -> bool:
+    s = (text or "").strip()
+    if not s:
+        return False
+    if _TEXT_AREA_VERBS_RE.match(s):
+        return True
+    if len(s) >= 80 or len(s.split()) >= 10:
+        return True
+    return False
 
 
 def coerce_text_area_from_validation(rows: list[Row]) -> list[Row]:
     """Use extracted character limits as a generic fallback for text sizing. Large
-    limits describe narrative fields; small limits describe single-line fields."""
+    limits describe narrative fields only when the prompt itself is narrative.
+    Widget geometry, when available, is more authoritative and runs after this."""
     for r in rows:
         validation = (r.answer_validation or "").strip()
         if not validation:
@@ -1588,7 +1861,7 @@ def coerce_text_area_from_validation(rows: list[Row]) -> list[Row]:
         limit = int(m.group(1))
         qt = (r.question_type or "").strip().lower()
         text = (r.question_text or "").strip()
-        if qt == "text box" and limit >= 400:
+        if qt == "text box" and limit >= 400 and _looks_like_narrative_prompt(text):
             r.question_type = "Text Area"
         elif qt == "text area" and limit <= 200 and len(text.split()) <= 6 and len(text) <= 50:
             r.question_type = "Text Box"
@@ -1666,6 +1939,63 @@ def _nearest_prompt_condition_parent(rows: list[Row], index: int) -> tuple[Row |
         if literal:
             return prev, literal
     return None, ""
+
+
+def _nearest_option_parent_for_child_label(rows: list[Row], index: int) -> tuple[Row | None, str]:
+    label = _clean_attached_label(rows[index].question_text)
+    if not label:
+        return None, ""
+    current_section = (rows[index].section or "").strip()
+    for prev in reversed(rows[max(0, index - 12):index]):
+        if prev.sequence is None:
+            continue
+        if current_section and prev.section and prev.section != current_section:
+            continue
+        ptype = (prev.question_type or "").strip().lower()
+        if ptype not in ("radio button", "checkbox group", "dropdown", "drop down"):
+            continue
+        option_map = _choice_value_map(prev.answer_text)
+        literal = option_map.get(label)
+        if literal:
+            return prev, literal
+    return None, ""
+
+
+def _nearest_yesno_parent_for_followup(rows: list[Row], index: int) -> tuple[Row | None, str]:
+    """For a stale checked(selected) branch on a follow-up row, use the nearest
+    previous Yes/No-style decision when no option-label match exists."""
+    text = _full_normtext(rows[index].question_text)
+    preferred = ""
+    prompt_literal = re.match(r"^(?:if|when)\s+(yes|no)\b", text)
+    if prompt_literal:
+        preferred = prompt_literal.group(1)
+    for prev in reversed(rows[max(0, index - 8):index]):
+        if prev.sequence is None:
+            continue
+        ptype = (prev.question_type or "").strip().lower()
+        if ptype not in ("radio button", "checkbox group", "dropdown", "drop down"):
+            continue
+        option_map = _choice_value_map(prev.answer_text)
+        values = {_normtext(v).strip(":/"): v for v in option_map.values()}
+        if preferred and preferred in values:
+            return prev, values[preferred]
+        if "yes" in values and "no" in values:
+            return prev, values["yes"]
+    return None, ""
+
+
+def _previous_valid_branch(rows: list[Row], index: int) -> str:
+    current_section = (rows[index].section or "").strip()
+    for prev in reversed(rows[max(0, index - 3):index]):
+        if current_section and prev.section and prev.section != current_section:
+            continue
+        ptype = (prev.question_type or "").strip().lower()
+        if ptype not in ("text box", "text area", "date", "number", "signature", "checkbox group"):
+            continue
+        bl = (prev.branching_logic or "").strip()
+        if bl and "checked(selected)" not in bl.lower():
+            return bl
+    return ""
 
 
 def repair_branching_reference_numbers(rows: list[Row]) -> list[Row]:
@@ -1747,6 +2077,12 @@ def repair_branching_reference_numbers(rows: list[Row]) -> list[Row]:
         if is_checked and value_key.startswith("checked"):
             best_parent = _nearest_branch_parent(rows, i, value, require_checkbox=True)
             if best_parent is None:
+                label_parent, label_literal = _nearest_option_parent_for_child_label(rows, i)
+                if label_parent is not None:
+                    value = label_literal
+                    value_key = _normtext(value).strip(":/")
+                    best_parent = label_parent
+            if best_parent is None:
                 # If the model wrote checked(selected) but the child prompt says
                 # "If <literal>...", recover only when that literal exists on a
                 # nearby choice parent. Otherwise leave the branch unchanged.
@@ -1755,6 +2091,17 @@ def repair_branching_reference_numbers(rows: list[Row]) -> list[Row]:
                     value = prompt_literal
                     value_key = _normtext(value).strip(":/")
                     best_parent = prompt_parent
+            if best_parent is None:
+                inherited = _previous_valid_branch(rows, i)
+                if inherited:
+                    r.branching_logic = inherited
+                    continue
+            if best_parent is None:
+                yn_parent, yn_literal = _nearest_yesno_parent_for_followup(rows, i)
+                if yn_parent is not None:
+                    value = yn_literal
+                    value_key = _normtext(value).strip(":/")
+                    best_parent = yn_parent
         else:
             best_parent = _nearest_branch_parent(rows, i, value, require_checkbox=False)
         best_seq = best_parent.sequence if best_parent is not None else None
@@ -1762,6 +2109,8 @@ def repair_branching_reference_numbers(rows: list[Row]) -> list[Row]:
             if valid_ref and value != raw_value.strip():
                 norm_prefix = "Display if" if prefix.lower().startswith("display") else "If"
                 r.branching_logic = f"{norm_prefix} Q{ref_seq} = {value}"
+            elif not valid_ref:
+                r.branching_logic = ""
             continue
         if best_seq == ref_seq and value == raw_value.strip():
             continue
@@ -1774,13 +2123,50 @@ def repair_branching_reference_numbers(rows: list[Row]) -> list[Row]:
     return rows
 
 
+def clear_spurious_option_branches(rows: list[Row]) -> list[Row]:
+    """Clear option-literal branches that clearly leaked past their child row.
+
+    A branch like "Display if Qn = Other" is valid for a write-in child or a prompt
+    that explicitly says "If Other...". It is not valid for unrelated section
+    banners or long prompts whose conditional text does not mention that literal.
+    """
+    seq_to_row = {r.sequence: r for r in rows if r.sequence is not None}
+    for r in rows:
+        bl = (r.branching_logic or "").strip()
+        m = _BRANCH_Q_RE.match(bl)
+        if not m:
+            continue
+        prefix, ref_text, raw_value = m.groups()
+        if prefix.lower().startswith("if"):
+            continue
+        if "checked" in raw_value.lower():
+            continue
+        try:
+            parent = seq_to_row.get(int(ref_text))
+        except ValueError:
+            parent = None
+        if parent is None or _normtext(raw_value).strip(":/") not in _choice_value_map(parent.answer_text):
+            continue
+        option_map = _choice_value_map(parent.answer_text)
+        literal = option_map.get(_normtext(raw_value).strip(":/"), raw_value.strip())
+        text = r.question_text or ""
+        if _condition_from_prompt_text(text, option_map) == literal:
+            continue
+        if _clean_attached_label(text) == _normtext(literal).strip(":/"):
+            continue
+        qt = (r.question_type or "").strip().lower()
+        if qt == "display" or _looks_like_narrative_prompt(text):
+            r.branching_logic = ""
+    return rows
+
+
 def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> list[Row]:
     rows = drop_chrome(rows)
+    rows = drop_repeated_page_bands(rows, doc_struct)
     rows = split_header_band(rows)
     rows = normalize_section_header_type(rows)         # Section Header → Display 'New Section'
     rows = coerce_text_area_for_bullet_prompts(rows)   # 'o Provide…' Display/Checkbox → Text Area
-    rows = force_display_for_document_below(rows)
-    rows = force_text_box_for_description_attached(rows)
+    rows = coerce_static_instruction_rows(rows)
     rows = merge_parenthetical_subnotes(rows)
     rows = merge_bullet_list_displays(rows)
     rows = collapse_choice_groups(rows)
@@ -1788,8 +2174,11 @@ def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> 
     rows = split_compound_choice_rows(rows)
     rows = split_attached_text_options(rows)
     rows = dedupe_attached_text_children(rows)
+    rows = absorb_orphan_checkbox_options(rows)
+    rows = dedupe_attached_text_children(rows)
     rows = flatten_yesno_layout_tables(rows)
     rows = coerce_select_all_choice_groups(rows)
+    rows = coerce_question_choice_groups_to_radio(rows)
     rows = separate_answer_validation(rows)
     rows = dedupe_table_repetitions(rows)              # collapse 4× Falls table → 1
     rows = dedupe_repeating_headers(rows)
@@ -1805,9 +2194,10 @@ def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> 
     rows = normalize_branching(rows)
     rows = normalize_branching_yes_no(rows)
     rows = coerce_short_label_to_text_box(rows)
-    rows = coerce_text_area_from_widget_layout(rows, doc_struct)
     rows = coerce_text_area_from_validation(rows)
+    rows = coerce_text_area_from_widget_layout(rows, doc_struct)
     rows = coerce_select_all_choice_groups(rows)
+    rows = coerce_question_choice_groups_to_radio(rows)
     rows = coerce_yesno_to_radio_button(rows)
     rows = coerce_group_table_child_to_text_box(rows)
     rows = resolve_checkbox_branching(rows)
@@ -1817,4 +2207,5 @@ def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> 
     rows = normalize_choice_options(rows)
     rows = separate_answer_validation(rows)
     rows = repair_branching_reference_numbers(rows)
+    rows = clear_spurious_option_branches(rows)
     return rows
