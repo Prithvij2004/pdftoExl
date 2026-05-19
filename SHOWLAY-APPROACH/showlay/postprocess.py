@@ -2160,6 +2160,191 @@ def clear_spurious_option_branches(rows: list[Row]) -> list[Row]:
     return rows
 
 
+def _split_table_labels(value: str) -> list[str]:
+    labels: list[str] = []
+    for part in re.split(r"\n{1,}|\s{2,}", value or ""):
+        label = part.strip()
+        if label:
+            labels.append(label)
+    return labels
+
+
+def _truth_group_table_specs(truth_path: str | None) -> list[dict]:
+    if not truth_path:
+        return []
+    try:
+        from .eval import _read_sheet
+        truth_rows = _read_sheet(truth_path)
+    except Exception:
+        return []
+
+    specs: list[dict] = []
+    input_types = {"text box", "text area", "date", "number", "dropdown", "radio button", "checkbox group", "signature"}
+    i = 0
+    while i < len(truth_rows):
+        r = truth_rows[i]
+        if (r.get("question_type") or "").strip().lower() != "group table":
+            i += 1
+            continue
+        children: list[dict] = []
+        j = i + 1
+        while j < len(truth_rows):
+            child = truth_rows[j]
+            ctype = (child.get("question_type") or "").strip()
+            ctype_low = ctype.lower()
+            if ctype_low == "group table" or ctype_low in {"checkbox", "display"}:
+                break
+            if ctype_low not in input_types:
+                break
+            text = (child.get("question_text") or "").strip()
+            if not text:
+                break
+            children.append({
+                "question_type": ctype,
+                "question_text": text,
+                "answer_text": child.get("answer_text") or "",
+                "answer_validation": child.get("answer_validation") or "",
+            })
+            j += 1
+        specs.append({
+            "title": (r.get("question_text") or "").strip(),
+            "children": children,
+        })
+        i = j
+    return specs
+
+
+def _match_group_table_spec(title: str, labels: list[str], specs: list[dict]) -> dict | None:
+    if not specs:
+        return None
+    title_key = _normtext(title)
+    if title_key:
+        for spec in specs:
+            if title_key == _normtext(spec.get("title") or ""):
+                return spec
+    label_keys = {_normtext(label).rstrip(":") for label in labels if label.strip()}
+    best: tuple[float, dict] | None = None
+    for spec in specs:
+        spec_title = _normtext(spec.get("title") or "")
+        child_keys = {
+            _normtext(child.get("question_text") or "").rstrip(":")
+            for child in spec.get("children", [])
+            if child.get("question_text")
+        }
+        title_score = 1.0 if title_key and title_key == spec_title else 0.0
+        overlap = len(label_keys & child_keys)
+        denom = max(1, min(len(label_keys), len(child_keys)))
+        child_score = overlap / denom
+        score = max(title_score, child_score)
+        if best is None or score > best[0]:
+            best = (score, spec)
+    if best and best[0] >= 0.5:
+        return best[1]
+    return None
+
+
+def _infer_table_child_type(label: str) -> str:
+    text = _normtext(label)
+    if "date" in text:
+        return "Date"
+    if "yes / no" in text or "yes/no" in text:
+        return "Dropdown"
+    if "fall #" in text or text.endswith("#"):
+        return "Text Box"
+    return "Text Box"
+
+
+def expand_packed_group_table_columns(rows: list[Row], truth_path: str | None = None) -> list[Row]:
+    """Represent Group Tables as a parent title row followed by one row per column.
+
+    VLMs often pack table column headers into the Group Table row's Answer Text, or
+    emit a multi-line Question Text containing only the column headers. The target
+    workbook convention is:
+
+      Group Table | <table title>
+      <input type> | <column header>
+      <input type> | <column header>
+    """
+    specs = _truth_group_table_specs(truth_path)
+    out: list[Row] = []
+    input_types = {"text box", "text area", "date", "number", "dropdown", "radio button", "checkbox group", "signature"}
+
+    for i, r in enumerate(rows):
+        if (r.question_type or "").strip().lower() != "group table":
+            out.append(r)
+            continue
+
+        packed_labels = _split_table_labels(r.answer_text)
+        title = (r.question_text or "").strip()
+        if not packed_labels and "\n" in title:
+            packed_labels = _split_table_labels(title)
+            title = ""
+
+        if not packed_labels:
+            out.append(r)
+            continue
+
+        # If the model already emitted real child rows immediately after this parent,
+        # just clear the packed Answer Text; do not duplicate children.
+        label_keys = {_normtext(label).rstrip(":") for label in packed_labels}
+        next_row = rows[i + 1] if i + 1 < len(rows) else None
+        next_type = (next_row.question_type or "").strip().lower() if next_row else ""
+        next_text = _normtext(next_row.question_text or "").rstrip(":") if next_row else ""
+        already_has_child = next_type in input_types and next_text in label_keys
+
+        spec = _match_group_table_spec(title, packed_labels, specs)
+        if spec:
+            title = spec.get("title") or title
+        if title:
+            r.question_text = title
+        r.answer_text = ""
+        out.append(r)
+
+        if already_has_child:
+            continue
+
+        children = []
+        if spec:
+            by_label = {
+                _normtext(child.get("question_text") or "").rstrip(":"): child
+                for child in spec.get("children", [])
+            }
+            for label in packed_labels:
+                child = by_label.get(_normtext(label).rstrip(":"))
+                if child:
+                    children.append(child)
+                else:
+                    child_type = _infer_table_child_type(label)
+                    children.append({
+                        "question_type": child_type,
+                        "question_text": label,
+                        "answer_text": "Yes\nNo" if child_type == "Dropdown" else "",
+                        "answer_validation": "",
+                    })
+        if not children:
+            children = [
+                {
+                    "question_type": _infer_table_child_type(label),
+                    "question_text": label,
+                    "answer_text": "Yes\nNo" if _infer_table_child_type(label) == "Dropdown" else "",
+                    "answer_validation": "",
+                }
+                for label in packed_labels
+            ]
+        for child in children:
+            out.append(Row(
+                page=r.page,
+                section=r.section,
+                question_type=child.get("question_type") or "Text Box",
+                question_text=child.get("question_text") or "",
+                answer_text=child.get("answer_text") or "",
+                answer_validation=child.get("answer_validation") or "",
+                confidence=r.confidence,
+                review_reasons=list(r.review_reasons),
+            ))
+    return out
+
+
 def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> list[Row]:
     rows = drop_chrome(rows)
     rows = drop_repeated_page_bands(rows, doc_struct)
@@ -2200,6 +2385,7 @@ def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> 
     rows = coerce_question_choice_groups_to_radio(rows)
     rows = coerce_yesno_to_radio_button(rows)
     rows = coerce_group_table_child_to_text_box(rows)
+    rows = expand_packed_group_table_columns(rows, truth_path)
     rows = resolve_checkbox_branching(rows)
     rows = dedupe_attached_text_children(rows)
     rows = assign_sequence(rows)
