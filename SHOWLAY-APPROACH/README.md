@@ -44,10 +44,17 @@ BEDROCK_VLM_MODEL_ID=qwen.qwen3-vl-235b-a22b
 
 The app loads `.env` automatically from this folder.
 
-### 3. Confirm template files are available
+### 3. Add the required XLSX template
 
-The command-line runner requires a template or truth workbook path as its second
-argument. The web app looks for a default template in one of these locations:
+The pipeline requires an `.xlsx` template workbook with the target 28-column
+layout. It clones that workbook when writing the generated output, so the agent
+cannot run from the CLI or web UI without a template file.
+
+For CLI runs, the template can be anywhere as long as you pass its path as the
+second argument to `run.py`.
+
+For the web UI, place the template in one of these expected locations before
+starting `webapp.py`:
 
 ```text
 ..\docs\support_docs\CHOICES Safety Determination Request Form Final_11_20.xlsx
@@ -57,6 +64,10 @@ argument. The web app looks for a default template in one of these locations:
 ## Run the Application
 
 ### Option A: Local web app
+
+Before starting the web app, confirm the required `.xlsx` template exists in one
+of the web UI template locations listed in setup step 3. The web app loads that
+template at startup.
 
 Start the web app:
 
@@ -81,7 +92,8 @@ runtime\output_web\
 
 ### Option B: Single PDF from the command line
 
-Run the end-to-end pipeline with a source PDF and a truth/template workbook:
+Run the end-to-end pipeline with a source PDF and a truth/template workbook. The
+second argument is the required `.xlsx` template path:
 
 ```powershell
 python run.py "..\SOURCE AND TARGET FILES\sph_rev25-3_H1700-3_final_approved 1.pdf" `
