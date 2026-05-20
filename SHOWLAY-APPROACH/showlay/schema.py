@@ -32,7 +32,7 @@ Header (0-indexed):
  27  IT Notes
 """
 from __future__ import annotations
-from typing import Optional, Literal
+
 from pydantic import BaseModel, Field
 
 COLUMNS_28 = [
@@ -160,7 +160,7 @@ class Row(BaseModel):
     speech_to_text: str = ""
     submission_history: str = ""
     concept_code: str = ""
-    sequence: Optional[int] = None
+    sequence: int | None = None
     question_rule: str = ""
     question_type: str = ""               # one of QUESTION_TYPES (loose)
     question_text: str = ""
@@ -180,8 +180,8 @@ class Row(BaseModel):
     it_notes: str = ""
 
     # bookkeeping for confidence pass (NOT written to gold-shape sheet)
-    page: Optional[int] = None
-    bbox: Optional[list[float]] = None    # [x0,y0,x1,y1] PDF coords
+    page: int | None = None
+    bbox: list[float] | None = None    # [x0,y0,x1,y1] PDF coords
     confidence: float = 0.0
     review_reasons: list[str] = Field(default_factory=list)
 
@@ -291,12 +291,17 @@ question_text equal to the column header.
    itself is the ANSWER SPACE of the previous question, not a separate Text Area. Only
    emit a Text Area row when there's a question or label associated with it.
 
-4. Already-present row: do NOT emit the same question twice. If a label like "Description
-   of documentation attached:" appears once after each branching block, emit it ONCE per
-   distinct context (still its own row), but never duplicate.
+4. Already-present row: do NOT emit the same question twice only when it means the
+   same user-entered fact in the same context. If the same label appears under a
+   different role, branch, table instance, row number, fall instance, or repeated
+   block, emit it again with its local context. Example: four "Date of fall:" blanks
+   for four fall entries are four distinct Date rows. Repeated page headers such as
+   Applicant Name/SSN/DOB remain chrome and are emitted only once.
 
-5. Repeated table instances: if a Group Table is visually repeated 4x for 4 instances,
-   emit the table SHAPE ONCE (parent + columns), not 4 copies.
+5. Repeated table instances: if a Group Table is visually repeated for multiple
+   real-world instances, keep each instance because the same column label can mean
+   different facts. Only remove a repeat when it is clearly page chrome or the exact
+   same field repeated for the same meaning.
 
 6. Question splitting: a multi-line question or paragraph is ONE row. Do NOT split a
    single labeled question into two Display rows just because the text wraps.

@@ -3,17 +3,18 @@ Post-processing passes that run AFTER the per-page VLM extraction:
 
   1. drop_chrome               — drop page-recurring titles/footers and pure-underline rows
   2. dedupe_repeating_headers  — collapse "(header)" rows that recur on every page
-  3. dedupe_consecutive        — collapse identical (type, text) rows next to each other
+  3. dedupe_consecutive        — collapse identical Display rows next to each other
   4. assign_sequence           — dense 1-based reading-order index across all pages
   5. propagate_section         — forward-fill Section column from "New Section" Display rows
   6. normalize_branching       — standardize Branching Logic strings
   7. normalize_answer_text     — fill in default char limits / format hints by question_type
 """
 from __future__ import annotations
+
 import re
 from collections import defaultdict
-from .schema import Row
 
+from .schema import Row
 
 _HEADER_PREFIX_RE = re.compile(r"^\s*\(header\)\s*", re.IGNORECASE)
 _NEAR_EMPTY_RE = re.compile(r"^[\s_\-\.—–/\\\(\)\[\]:;,]+$")  # underscores, dashes, dots only
@@ -83,13 +84,16 @@ def drop_chrome(rows: list[Row], min_recur_pages: int = 3) -> list[Row]:
         non_alpha = re.sub(r"[A-Za-z0-9]", "", txt)
         alpha_only = re.sub(r"[^A-Za-z0-9]", "", txt)
         if not alpha_only or (len(non_alpha) > len(alpha_only) * 5 and len(alpha_only) < 4):
-            drop_idx.add(i); continue
+            drop_idx.add(i)
+            continue
         if _NEAR_EMPTY_RE.match(txt):
-            drop_idx.add(i); continue
+            drop_idx.add(i)
+            continue
 
         # (a) Display chrome by explicit regex
         if qt == "display" and _CHROME_TEXT_RE.search(txt):
-            drop_idx.add(i); continue
+            drop_idx.add(i)
+            continue
 
         # (b) Combined running-header band (will be split by split_header_band on the
         # surviving page-1 occurrence; drop everything else)
@@ -104,7 +108,8 @@ def drop_chrome(rows: list[Row], min_recur_pages: int = 3) -> list[Row]:
                 first_kept = False
                 for k in same_band:
                     if rows[k].page == pages[0] and not first_kept:
-                        first_kept = True; continue
+                        first_kept = True
+                        continue
                     drop_idx.add(k)
 
     return [r for i, r in enumerate(rows) if i not in drop_idx]
@@ -660,42 +665,15 @@ def normalize_section_header_type(rows: list[Row]) -> list[Row]:
 
 
 def dedupe_table_repetitions(rows: list[Row]) -> list[Row]:
-    """If a Group Table row + N children pattern repeats with identical (type, text)
-    sequence (e.g. PDF shows 4 falls instances; truth encodes the SHAPE once), keep
-    only the first repetition. Detection: any Group Table whose immediately-preceding
-    Group Table within the last K rows has the same parent text → drop this Group
-    Table block (parent + following children up to next Group Table or non-input row)."""
-    drop_idx: set[int] = set()
-    seen_table_keys: dict[str, int] = {}  # parent normalized text -> first index
-    n = len(rows)
-    i = 0
-    while i < n:
-        r = rows[i]
-        if (r.question_type or "").strip().lower() == "group table":
-            key = _normtext(r.question_text)
-            # Find end of this table block: until next Group Table, Display "New Section",
-            # or a Checkbox/Display that breaks the pattern.
-            end = i + 1
-            while end < n:
-                t2 = (rows[end].question_type or "").strip().lower()
-                txt2 = (rows[end].question_text or "").strip().lower()
-                if t2 == "group table" or (t2 == "display" and txt2 == "new section"):
-                    break
-                # Allow children that are Date / Text Box / Number / Text Area / Checkbox Group
-                if t2 in ("date", "text box", "number", "text area", "checkbox group", "dropdown", "radio button"):
-                    end += 1
-                    continue
-                break
-            if key in seen_table_keys:
-                # Drop this entire repetition
-                for j in range(i, end):
-                    drop_idx.add(j)
-            else:
-                seen_table_keys[key] = i
-            i = end
-            continue
-        i += 1
-    return [r for i, r in enumerate(rows) if i not in drop_idx]
+    """Keep repeated table instances unless another pass has true context evidence.
+
+    A visual table repeated for Fall 1, Fall 2, etc. can reuse the same labels
+    ("Date of fall", "Location of Fall") while meaning different facts. The older
+    implementation collapsed by text only, which removed valid repeated fields and
+    could also drop continuation rows on the next page. Header/page-chrome dedupe is
+    still handled by the dedicated page-band passes above.
+    """
+    return rows
 
 
 def _strip_for_dedup(s: str) -> str:
@@ -1554,7 +1532,6 @@ def absorb_orphan_checkbox_options(rows: list[Row]) -> list[Row]:
         absorbed_any = False
         while j < n:
             row = rows[j]
-            qt = (row.question_type or "").strip().lower()
             if _is_text_input_row(row):
                 existing_branch = (row.branching_logic or "").strip().lower()
                 if "<parent_seq>" in existing_branch or existing_branch.startswith("display if "):
@@ -1793,7 +1770,7 @@ def coerce_text_area_from_widget_layout(rows: list[Row], doc_struct=None) -> lis
             continue
         ordered = sorted(group, key=lambda g: (g["rect"][1], g["rect"][0]))
         stacked = True
-        for a, b in zip(ordered, ordered[1:]):
+        for a, b in zip(ordered, ordered[1:], strict=False):
             ax0, ay0, ax1, ay1 = a["rect"]
             bx0, by0, bx1, by1 = b["rect"]
             overlap = max(0.0, min(ax1, bx1) - max(ax0, bx0))
@@ -2365,7 +2342,7 @@ def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> 
     rows = coerce_select_all_choice_groups(rows)
     rows = coerce_question_choice_groups_to_radio(rows)
     rows = separate_answer_validation(rows)
-    rows = dedupe_table_repetitions(rows)              # collapse 4× Falls table → 1
+    rows = dedupe_table_repetitions(rows)              # preserve repeated table instances by context
     rows = dedupe_repeating_headers(rows)
     rows = dedupe_unprefixed_header_aliases(rows)      # drop 'Applicant Name:' page-2 strays
     rows = dedupe_consecutive(rows)
