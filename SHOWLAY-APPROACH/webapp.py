@@ -39,6 +39,7 @@ from showlay.extract import (
 )
 from showlay.field_review import build_review_manifest, write_review_manifest
 from showlay.postprocess import run_all
+from showlay.schema import Row
 from showlay.writer import write_review_sidecar, write_workbook
 
 ROOT = THIS.parent
@@ -1944,7 +1945,7 @@ async function saveManifest() {
     if (!res.ok) throw new Error(body.detail || 'Save failed');
     manifest = body.manifest;
     dirty = false;
-    status.textContent = 'Saved';
+    status.textContent = 'Saved and output updated';
     renderRows();
     renderPage();
     renderSelected();
@@ -2086,11 +2087,71 @@ def _normalize_saved_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     return manifest
 
 
+def _nullable_int(value: Any) -> int | None:
+    if value in ("", None):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _rows_from_manifest(manifest: dict[str, Any]) -> list[Row]:
+    rows: list[Row] = []
+    for item in manifest.get("rows", []):
+        snapshot = dict(item.get("row") or {})
+        snapshot.setdefault("sequence", item.get("sequence"))
+        snapshot.setdefault("page", item.get("page"))
+        snapshot.setdefault("bbox", item.get("bbox"))
+        snapshot.setdefault("confidence", item.get("row_confidence", 1.0))
+        snapshot.setdefault("review_reasons", item.get("review_reasons", []))
+        snapshot["sequence"] = _nullable_int(snapshot.get("sequence"))
+        snapshot["page"] = _nullable_int(snapshot.get("page"))
+        rows.append(Row(**snapshot))
+    return rows
+
+
+def _template_for_manifest(manifest: dict[str, Any]) -> Path:
+    template_path = manifest.get("template_path")
+    if template_path:
+        template = Path(str(template_path))
+        if template.is_file():
+            return template
+    return DEFAULT_TEMPLATE
+
+
+def _refresh_outputs_from_manifest(job_id: str, manifest: dict[str, Any]) -> dict[str, str]:
+    rows = _rows_from_manifest(manifest)
+    out_xlsx = OUTPUT_DIR / f"{job_id}.xlsx"
+    review_xlsx = OUTPUT_DIR / f"{job_id}_review.xlsx"
+    write_workbook(str(_template_for_manifest(manifest)), str(out_xlsx), rows)
+    write_review_sidecar(str(review_xlsx), rows)
+
+    job = JOBS.get(job_id)
+    if job is not None:
+        job["row_count"] = len(rows)
+        job["field_high_risk"] = manifest["summary"]["field_risk_counts"].get("high", 0)
+        job["field_medium_risk"] = manifest["summary"]["field_risk_counts"].get("medium", 0)
+        job["rows_needing_review"] = manifest["summary"]["rows_needing_review"]
+        job["message"] = "Review saved and workbook updated"
+
+    return {
+        "workbook": str(out_xlsx),
+        "review_workbook": str(review_xlsx),
+    }
+
+
 def _save_manifest(job_id: str, manifest: dict[str, Any]) -> dict[str, Any]:
     path = _manifest_file(job_id)
     if not path.exists():
         raise HTTPException(404, "Review manifest not ready")
     manifest = _normalize_saved_manifest(manifest)
+    outputs = _refresh_outputs_from_manifest(job_id, manifest)
+    manifest["outputs"] = {
+        **manifest.get("outputs", {}),
+        **outputs,
+        "updated_at": manifest["updated_at"],
+    }
     path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     return manifest
 
@@ -2113,7 +2174,14 @@ def manifest_data(job_id: str) -> JSONResponse:
 
 @app.post("/manifest-data/{job_id}")
 def save_manifest_data(job_id: str, manifest: dict[str, Any]) -> JSONResponse:
-    return JSONResponse({"status": "saved", "manifest": _save_manifest(job_id, manifest)})
+    saved = _save_manifest(job_id, manifest)
+    return JSONResponse(
+        {
+            "status": "saved_and_outputs_updated",
+            "manifest": saved,
+            "outputs": saved.get("outputs", {}),
+        }
+    )
 
 
 @app.get("/page-image/{job_id}/{page_no}")

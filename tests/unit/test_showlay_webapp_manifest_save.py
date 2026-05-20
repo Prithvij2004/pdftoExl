@@ -59,8 +59,25 @@ def test_normalize_saved_manifest_syncs_row_values_and_summary():
     assert manifest["updated_at"]
 
 
-def test_save_manifest_writes_normalized_json(tmp_path, monkeypatch):
+def test_save_manifest_writes_normalized_json_and_outputs(tmp_path, monkeypatch):
     monkeypatch.setattr(webapp, "OUTPUT_DIR", tmp_path)
+    template = tmp_path / "template.xlsx"
+    monkeypatch.setattr(webapp, "DEFAULT_TEMPLATE", template)
+    calls = {}
+
+    def fake_write_workbook(template_path, out_path, rows):
+        calls["workbook"] = (template_path, out_path, rows)
+        Path(out_path).write_text("workbook", encoding="utf-8")
+        return out_path
+
+    def fake_write_review_sidecar(out_path, rows):
+        calls["review_workbook"] = (out_path, rows)
+        Path(out_path).write_text("review", encoding="utf-8")
+        return out_path
+
+    monkeypatch.setattr(webapp, "write_workbook", fake_write_workbook)
+    monkeypatch.setattr(webapp, "write_review_sidecar", fake_write_review_sidecar)
+
     path = tmp_path / "abc123_review_manifest.json"
     path.write_text(json.dumps(_manifest()), encoding="utf-8")
 
@@ -70,3 +87,10 @@ def test_save_manifest_writes_normalized_json(tmp_path, monkeypatch):
     assert saved["summary"]["row_count"] == 1
     assert on_disk["rows"][0]["row_index"] == 0
     assert on_disk["rows"][0]["row"]["question_type"] == "Text Box"
+    assert saved["outputs"]["workbook"] == str(tmp_path / "abc123.xlsx")
+    assert saved["outputs"]["review_workbook"] == str(tmp_path / "abc123_review.xlsx")
+    assert saved["outputs"]["updated_at"] == saved["updated_at"]
+    assert calls["workbook"][0] == str(template)
+    assert calls["workbook"][1] == str(tmp_path / "abc123.xlsx")
+    assert calls["workbook"][2][0].question_text == "Applicant Name"
+    assert calls["review_workbook"][0] == str(tmp_path / "abc123_review.xlsx")
