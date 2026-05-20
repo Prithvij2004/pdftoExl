@@ -38,6 +38,7 @@ CHOICE_TYPES = {
 INPUT_TYPES = {"text box", "text area", "date", "number", "signature"}
 YES_NO = {"yes", "no", ""}
 KNOWN_QTYPES = {" ".join(q.split()).strip().lower() for q in QUESTION_TYPES}
+COMPOUND_FIELD_SUFFIXES = ("printed name", "signature", "date")
 
 
 def _norm(value: Any) -> str:
@@ -95,6 +96,83 @@ def _page_text(page: Any) -> str:
     return " ".join(str(block.get("text") or "") for block in _text_blocks(page))
 
 
+def _compound_field_evidence(query: str, page: Any) -> dict[str, Any] | None:
+    """Resolve labels like "Witness Date" to the local repeated "Date" block.
+
+    Signature sections repeat generic labels: Printed Name, Signature, Date.
+    A full generated label usually includes a role prefix, so generic string
+    matching can pick the role label or the first repeated Date on the page.
+    """
+    query_norm = _norm(query).rstrip(":")
+    suffix = next(
+        (candidate for candidate in COMPOUND_FIELD_SUFFIXES if query_norm.endswith(candidate)),
+        None,
+    )
+    if not suffix:
+        return None
+
+    role = query_norm[: -len(suffix)].strip(" :-,")
+    if not role:
+        return None
+    if role.startswith("individual service plan") or role == "revision":
+        return None
+
+    blocks = _text_blocks(page)
+    role_candidates: list[tuple[float, dict]] = []
+    for block in blocks:
+        text = str(block.get("text") or "")
+        text_norm = _norm(text).strip(" :-,")
+        if not text_norm:
+            continue
+        overlap = _token_overlap(role, text_norm)
+        sim = _similarity(role, text_norm)
+        if overlap >= 0.5 or sim >= 0.55:
+            role_candidates.append(((0.65 * overlap) + (0.35 * sim), block))
+    if not role_candidates:
+        return None
+
+    role_candidates.sort(
+        key=lambda item: (
+            item[0],
+            -float((item[1].get("rect") or [0, 0, 0, 0])[1]),
+        ),
+        reverse=True,
+    )
+
+    for _, role_block in role_candidates[:3]:
+        role_rect = role_block.get("rect") or []
+        if len(role_rect) != 4:
+            continue
+        role_y = float(role_rect[1])
+        targets: list[tuple[float, dict]] = []
+        for block in blocks:
+            text_norm = _norm(block.get("text")).strip(" :-,")
+            rect = block.get("rect") or []
+            if len(rect) != 4:
+                continue
+            if text_norm != suffix:
+                continue
+            y = float(rect[1])
+            delta = y - role_y
+            if 0 < delta <= 90:
+                targets.append((delta, block))
+        if targets:
+            targets.sort(key=lambda item: item[0])
+            target = targets[0][1]
+            return {
+                "score": 0.98,
+                "token_overlap": 1.0,
+                "similarity": 0.95,
+                "text": str(target.get("text") or "")[:220],
+                "rect": target.get("rect"),
+                "evidence_source": "compound_role_field",
+                "role_text": str(role_block.get("text") or "")[:220],
+                "role_rect": role_rect,
+            }
+
+    return None
+
+
 def _best_text_evidence(query: str, page: Any) -> dict[str, Any]:
     best: dict[str, Any] = {
         "score": 0.0,
@@ -106,6 +184,9 @@ def _best_text_evidence(query: str, page: Any) -> dict[str, Any]:
     query = (query or "").strip()
     if not query:
         return best
+    compound = _compound_field_evidence(query, page)
+    if compound is not None:
+        return compound
 
     for block in _text_blocks(page):
         text = str(block.get("text") or "")

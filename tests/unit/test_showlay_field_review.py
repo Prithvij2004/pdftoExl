@@ -527,6 +527,51 @@ def test_build_review_manifest_includes_page_cache_and_field_summary():
     assert manifest["rows"][0]["source"]["raw_vlm_index"] == 0
 
 
+def test_compound_signature_labels_use_local_repeated_field_bbox():
+    page = _page(
+        "Applicant, Member or Authorized Representative:",
+        "Printed Name",
+        "Signature",
+        "Date",
+        "Witness, if applicable:",
+        "Printed Name",
+        "Signature",
+        "Date",
+        "Service Coordinator:",
+        "Printed Name",
+        "Signature",
+        "Date",
+    )
+    page.text_blocks[0]["rect"] = [20, 300, 240, 314]
+    page.text_blocks[1]["rect"] = [20, 360, 85, 374]
+    page.text_blocks[2]["rect"] = [236, 360, 283, 374]
+    page.text_blocks[3]["rect"] = [452, 360, 474, 374]
+    page.text_blocks[4]["rect"] = [20, 390, 112, 404]
+    page.text_blocks[5]["rect"] = [20, 430, 85, 444]
+    page.text_blocks[6]["rect"] = [236, 430, 283, 444]
+    page.text_blocks[7]["rect"] = [452, 430, 474, 444]
+    page.text_blocks[8]["rect"] = [20, 530, 112, 544]
+    page.text_blocks[9]["rect"] = [20, 582, 85, 596]
+    page.text_blocks[10]["rect"] = [236, 582, 283, 596]
+    page.text_blocks[11]["rect"] = [452, 582, 474, 596]
+    doc = FakeDoc(pages=[page])
+    rows = [
+        _row(sequence=1, question_type="Signature", question_text="Witness Signature:"),
+        _row(sequence=2, question_type="Date", question_text="Witness Date:"),
+        _row(sequence=3, question_type="Date", question_text="Service Coordinator Date:"),
+    ]
+
+    manifest = build_review_manifest(rows, doc_struct=doc)
+
+    assert manifest["rows"][0]["source"]["nearest_text_block"]["rect"] == [236, 430, 283, 444]
+    assert manifest["rows"][1]["source"]["nearest_text_block"]["rect"] == [452, 430, 474, 444]
+    assert manifest["rows"][2]["source"]["nearest_text_block"]["rect"] == [452, 582, 474, 596]
+    assert (
+        manifest["rows"][2]["source"]["nearest_text_block"]["evidence_source"]
+        == "compound_role_field"
+    )
+
+
 def test_write_review_manifest_round_trips_json(tmp_path):
     doc = FakeDoc(pages=[_page("Applicant Name")])
     manifest = build_review_manifest([_row()], doc_struct=doc, run_id="round-trip")
