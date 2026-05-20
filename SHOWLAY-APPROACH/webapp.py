@@ -17,7 +17,9 @@ import os
 import time
 import traceback
 import uuid
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -1207,6 +1209,782 @@ fetch(`/manifest-data/${jobId}`)
 """
 
 
+_WORKBENCH_EDITOR_HTML = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8" />
+<title>SHOWLAY - Review Workbench</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --navy:#001E60;
+    --blue:#2855A6;
+    --coral:#E35D5B;
+    --bg:#F7F8FB;
+    --surface:#FFFFFF;
+    --surface-2:#F2F4F9;
+    --line:#E2E6EE;
+    --line-2:#CBD3E0;
+    --text:#0E1F4D;
+    --muted:#5B6B8C;
+    --ok:#00875A;
+    --warn:#B25E00;
+    --err:#C8102E;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  button, input, textarea, select { font:inherit; }
+  .top {
+    height:56px;
+    background:var(--surface);
+    border-bottom:1px solid var(--line);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 18px;
+  }
+  .brand { font-weight:750; color:var(--navy); }
+  .top-actions { display:flex; align-items:center; gap:10px; }
+  .top a { color:var(--blue); text-decoration:none; font-weight:650; }
+  .shell {
+    display:grid;
+    grid-template-columns:320px minmax(420px, 1fr) minmax(430px, .95fr);
+    gap:12px;
+    height:calc(100vh - 56px);
+    padding:12px;
+  }
+  .panel {
+    min-height:0;
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:8px;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+  .panel-h {
+    padding:12px 14px;
+    border-bottom:1px solid var(--line);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+  }
+  .panel-h h2 { margin:0; font-size:15px; color:var(--navy); }
+  .hint, .status { color:var(--muted); font-size:12px; }
+  .status.error { color:var(--err); }
+  .rows, .detail, .pdf-wrap { min-height:0; overflow:auto; }
+  .rows { padding:8px; }
+  .row-card {
+    width:100%;
+    border:1px solid transparent;
+    background:transparent;
+    border-radius:7px;
+    text-align:left;
+    padding:10px;
+    cursor:pointer;
+    color:var(--text);
+    margin-bottom:6px;
+  }
+  .row-card:hover { background:var(--surface-2); }
+  .row-card.active {
+    background:#E8EDF7;
+    border-color:#CBD3E0;
+  }
+  .row-top {
+    display:flex;
+    justify-content:space-between;
+    gap:8px;
+    font-size:12px;
+    margin-bottom:4px;
+  }
+  .row-text {
+    font-size:13px;
+    line-height:1.35;
+    display:-webkit-box;
+    -webkit-line-clamp:3;
+    -webkit-box-orient:vertical;
+    overflow:hidden;
+  }
+  .row-actions { display:flex; gap:6px; margin-top:8px; }
+  .risk {
+    border-radius:999px;
+    padding:2px 7px;
+    font-size:11px;
+    font-weight:750;
+    text-transform:uppercase;
+  }
+  .risk.high { background:#FBD3D3; color:var(--err); }
+  .risk.medium { background:#FFF2C7; color:var(--warn); }
+  .risk.low { background:#D6F5D6; color:var(--ok); }
+  .mini-btn, .icon-btn, .save-btn {
+    border:1px solid var(--line-2);
+    background:var(--surface);
+    color:var(--navy);
+    border-radius:7px;
+    cursor:pointer;
+    font-weight:700;
+  }
+  .mini-btn { padding:5px 8px; font-size:12px; }
+  .mini-btn.danger { color:var(--err); }
+  .icon-btn {
+    width:32px;
+    height:32px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .icon-btn:disabled {
+    color:#A1A9B9;
+    background:var(--surface-2);
+    cursor:not-allowed;
+  }
+  .save-btn {
+    padding:8px 12px;
+    background:var(--navy);
+    color:white;
+    border-color:var(--navy);
+  }
+  .pdf-wrap {
+    padding:14px;
+    background:#E9EDF4;
+  }
+  .page-tools { display:flex; align-items:center; gap:8px; }
+  .page-tools select {
+    border:1px solid var(--line-2);
+    border-radius:7px;
+    padding:6px 9px;
+    color:var(--navy);
+    background:white;
+    font-weight:650;
+  }
+  .page-frame {
+    position:relative;
+    width:min(100%, 860px);
+    margin:0 auto;
+    background:white;
+    box-shadow:0 10px 30px rgba(14,31,77,.18);
+  }
+  .page-frame img { display:block; width:100%; height:auto; }
+  .bbox-layer { position:absolute; inset:0; }
+  .bbox {
+    position:absolute;
+    border:1.5px solid rgba(40,85,166,.35);
+    background:rgba(40,85,166,.08);
+    cursor:crosshair;
+  }
+  .bbox:hover, .bbox.active {
+    border-color:var(--coral);
+    background:rgba(227,93,91,.18);
+  }
+  .hl {
+    position:absolute;
+    border:2px solid var(--coral);
+    background:rgba(227,93,91,.16);
+    box-shadow:0 0 0 9999px rgba(0,30,96,.08);
+    display:none;
+    pointer-events:none;
+  }
+  .hover-note {
+    position:absolute;
+    right:10px;
+    bottom:10px;
+    background:rgba(255,255,255,.94);
+    border:1px solid var(--line);
+    border-radius:7px;
+    padding:7px 9px;
+    color:var(--muted);
+    font-size:12px;
+    box-shadow:0 6px 20px rgba(14,31,77,.12);
+  }
+  .detail {
+    padding:14px;
+    gap:12px;
+    display:flex;
+    flex-direction:column;
+  }
+  .summary-line {
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    align-items:center;
+  }
+  .pill {
+    border:1px solid var(--line);
+    background:var(--surface-2);
+    border-radius:999px;
+    padding:4px 9px;
+    font-size:12px;
+    color:var(--muted);
+  }
+  .form-grid {
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+  }
+  .field { display:flex; flex-direction:column; gap:5px; }
+  .field.wide { grid-column:1 / -1; }
+  label { font-size:12px; color:var(--muted); font-weight:700; }
+  input, textarea, select {
+    width:100%;
+    border:1px solid var(--line-2);
+    border-radius:7px;
+    padding:8px 9px;
+    color:var(--text);
+    background:white;
+  }
+  textarea { min-height:82px; resize:vertical; }
+  .advanced-bar {
+    border-top:1px solid var(--line);
+    padding-top:12px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+  }
+  .switch {
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    color:var(--navy);
+    font-size:13px;
+    font-weight:700;
+    cursor:pointer;
+  }
+  .switch input { width:auto; }
+  .raw-box { display:none; }
+  .raw-box.open { display:block; }
+  .raw-actions { display:flex; gap:8px; margin-top:8px; }
+  .raw-json {
+    min-height:260px;
+    font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size:12px;
+    line-height:1.45;
+  }
+  .save-row {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    border-top:1px solid var(--line);
+    padding-top:12px;
+  }
+  .empty { padding:18px; color:var(--muted); }
+  @media (max-width:1100px) {
+    .shell { grid-template-columns:280px 1fr; }
+    .panel.detail-panel { grid-column:1 / -1; }
+  }
+  @media (max-width:760px) {
+    .shell { grid-template-columns:1fr; height:auto; }
+    .panel { min-height:380px; }
+  }
+</style>
+</head><body>
+<div class="top">
+  <div class="brand">SHOWLAY - Review Workbench</div>
+  <div class="top-actions">
+    <span class="status" id="saveStatus">No changes yet</span>
+    <button class="save-btn" onclick="saveManifest()">Save</button>
+    <a href="/">New extraction</a>
+  </div>
+</div>
+<main class="shell">
+  <section class="panel">
+    <div class="panel-h">
+      <h2>Rows</h2>
+      <span class="hint" id="rowCount">Loading</span>
+    </div>
+    <div class="rows" id="rowList"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-h">
+      <h2>PDF page</h2>
+      <div class="page-tools">
+        <button class="icon-btn" id="prevPage" onclick="changePage(-1)" title="Previous page">&lt;</button>
+        <select id="pageSelect" onchange="setPage(Number(this.value), true)"></select>
+        <button class="icon-btn" id="nextPage" onclick="changePage(1)" title="Next page">&gt;</button>
+      </div>
+    </div>
+    <div class="pdf-wrap" id="pdfWrap">
+      <div class="page-frame" id="pageFrame">
+        <img id="pageImg" alt="PDF page evidence" />
+        <div class="bbox-layer" id="bboxLayer"></div>
+        <div class="hl" id="highlight"></div>
+        <div class="hover-note" id="pageMeta"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel detail-panel">
+    <div class="panel-h">
+      <h2>Review details</h2>
+      <span class="hint" id="rowMeta"></span>
+    </div>
+    <div class="detail" id="detail"></div>
+  </section>
+</main>
+
+<script>
+const jobId = "__JOB_ID__";
+let manifest = null;
+let selectedIndex = 0;
+let currentPage = 1;
+let dirty = false;
+let wheelLock = false;
+const REVIEW_FIELDS = [
+  'sequence',
+  'question_type',
+  'question_text',
+  'branching_logic',
+  'answer_text',
+  'answer_validation',
+  'section',
+  'required'
+];
+
+function riskClass(risk) {
+  return risk === 'high' ? 'high' : risk === 'medium' ? 'medium' : 'low';
+}
+
+function riskBadge(risk) {
+  const safeRisk = risk || 'low';
+  return `<span class="risk ${riskClass(safeRisk)}">${safeRisk}</span>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function fieldValue(row, field) {
+  return row?.fields?.[field]?.value ?? row?.row?.[field] ?? row?.[field] ?? '';
+}
+
+function rowTitle(row) {
+  const qtype = fieldValue(row, 'question_type');
+  const text = fieldValue(row, 'question_text');
+  return `${qtype}${qtype && text ? ' - ' : ''}${text}`;
+}
+
+function currentRow() {
+  return (manifest?.rows || [])[selectedIndex];
+}
+
+function markDirty(message = 'Unsaved changes') {
+  dirty = true;
+  const status = document.getElementById('saveStatus');
+  status.textContent = message;
+  status.classList.remove('error');
+}
+
+function toNumberOrBlank(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  const number = Number(value);
+  return Number.isFinite(number) ? number : value;
+}
+
+function selectRow(index, syncPage = true) {
+  if (!manifest?.rows?.length) return;
+  if (index < 0 || index >= manifest.rows.length) return;
+  selectedIndex = index;
+  const row = currentRow();
+  if (syncPage && row?.page) currentPage = Number(row.page);
+  renderRows();
+  renderPage();
+  renderSelected();
+}
+
+function renderRows() {
+  const rows = manifest.rows || [];
+  document.getElementById('rowCount').textContent =
+    `${rows.length} rows - ${manifest.summary?.rows_needing_review || 0} need review`;
+  document.getElementById('rowList').innerHTML = rows.map((row, index) => `
+    <div class="row-card ${index === selectedIndex ? 'active' : ''}"
+         data-row-index="${index}"
+         onmouseenter="selectRow(${index})">
+      <div class="row-top">
+        <span>Seq ${escapeHtml(fieldValue(row, 'sequence') || row.sequence || '')}
+          - Page ${escapeHtml(row.page || fieldValue(row, 'page') || '')}</span>
+        ${riskBadge(row.risk_level)}
+      </div>
+      <div class="row-text">${escapeHtml(rowTitle(row))}</div>
+      <div class="row-actions">
+        <button class="mini-btn" onclick="addRowAfter(${index}, event)">+ Add after</button>
+        <button class="mini-btn danger" onclick="removeRow(${index}, event)">Remove</button>
+      </div>
+    </div>
+  `).join('');
+  scrollActiveRow();
+}
+
+function scrollActiveRow() {
+  const active = document.querySelector('.row-card.active');
+  active?.scrollIntoView({ block: 'nearest' });
+}
+
+function bestRect(row) {
+  const rowBox = row?.bbox;
+  if (Array.isArray(rowBox) && rowBox.length === 4) return rowBox;
+  const sourceRect = row?.source?.nearest_text_block?.rect;
+  if (Array.isArray(sourceRect) && sourceRect.length === 4) return sourceRect;
+  const fieldRect = row?.fields?.question_text?.evidence?.rect;
+  if (Array.isArray(fieldRect) && fieldRect.length === 4) return fieldRect;
+  return null;
+}
+
+function pageByNumber(pageNo) {
+  return (manifest.pages || []).find(p => Number(p.page) === Number(pageNo));
+}
+
+function rowsOnPage(pageNo) {
+  return (manifest.rows || [])
+    .map((row, index) => ({ row, index }))
+    .filter(item => Number(item.row.page || item.row.row?.page || 0) === Number(pageNo));
+}
+
+function rectStyle(rect, page) {
+  const [x0, y0, x1, y1] = rect.map(Number);
+  return [
+    `left:${100 * x0 / page.width}%`,
+    `top:${100 * y0 / page.height}%`,
+    `width:${100 * Math.max(1, x1 - x0) / page.width}%`,
+    `height:${100 * Math.max(1, y1 - y0) / page.height}%`
+  ].join(';');
+}
+
+function setHighlight(row, page) {
+  const hl = document.getElementById('highlight');
+  const rect = bestRect(row);
+  if (!rect || !page?.width || !page?.height || Number(row?.page) !== Number(page.page)) {
+    hl.style.display = 'none';
+    return;
+  }
+  hl.style.cssText = rectStyle(rect, page);
+  hl.style.display = 'block';
+}
+
+function renderPageSelector() {
+  const select = document.getElementById('pageSelect');
+  const pages = manifest.pages || [];
+  select.innerHTML = pages.map(page =>
+    `<option value="${escapeHtml(page.page)}">Page ${escapeHtml(page.page)}</option>`
+  ).join('');
+  select.value = String(currentPage);
+  document.getElementById('prevPage').disabled = currentPage <= 1;
+  document.getElementById('nextPage').disabled = currentPage >= pages.length;
+}
+
+function renderPage() {
+  const page = pageByNumber(currentPage);
+  const img = document.getElementById('pageImg');
+  const layer = document.getElementById('bboxLayer');
+  renderPageSelector();
+  if (!page) {
+    img.removeAttribute('src');
+    layer.innerHTML = '';
+    return;
+  }
+  document.getElementById('pageMeta').textContent =
+    `Page ${page.page} - hover a box to select the row`;
+  img.onload = () => setHighlight(currentRow(), page);
+  img.src = `/page-image/${jobId}/${page.page}`;
+  layer.innerHTML = rowsOnPage(page.page).map(({ row, index }) => {
+    const rect = bestRect(row);
+    if (!rect) return '';
+    return `<div class="bbox ${index === selectedIndex ? 'active' : ''}"
+      title="${escapeHtml(rowTitle(row))}"
+      style="${rectStyle(rect, page)}"
+      onmouseenter="selectRow(${index}, false)"
+      onmouseover="selectRow(${index}, false)"
+      onmousemove="selectRow(${index}, false)"
+      onclick="selectRow(${index}, false)"></div>`;
+  }).join('');
+  setHighlight(currentRow(), page);
+}
+
+function fieldInput(field, label, row, options = {}) {
+  const value = fieldValue(row, field);
+  if (options.select) {
+    return `<div class="field">
+      <label for="${field}">${label}</label>
+      <select id="${field}" onchange="updateField('${field}', this.value)">
+        ${options.select.map(option =>
+          `<option value="${escapeHtml(option)}" ${String(value) === option ? 'selected' : ''}>
+            ${escapeHtml(option || 'Blank')}
+          </option>`
+        ).join('')}
+      </select>
+    </div>`;
+  }
+  if (options.large) {
+    return `<div class="field wide">
+      <label for="${field}">${label}</label>
+      <textarea id="${field}" oninput="updateField('${field}', this.value)">${escapeHtml(value)}</textarea>
+    </div>`;
+  }
+  return `<div class="field">
+    <label for="${field}">${label}</label>
+    <input id="${field}" type="${options.type || 'text'}" value="${escapeHtml(value)}"
+      oninput="updateField('${field}', this.value)" />
+  </div>`;
+}
+
+function ensureField(row, field) {
+  row.fields = row.fields || {};
+  if (!row.fields[field]) {
+    row.fields[field] = {
+      field,
+      value: '',
+      confidence: 1,
+      risk_level: 'medium',
+      review_reasons: ['manual_review'],
+      evidence: {},
+      suggested_action: 'Reviewer edited this field'
+    };
+  }
+  return row.fields[field];
+}
+
+function updateField(field, value) {
+  const row = currentRow();
+  if (!row) return;
+  const clean = ['sequence', 'page'].includes(field) ? toNumberOrBlank(value) : value;
+  row.row = row.row || {};
+  row.row[field] = clean;
+  ensureField(row, field).value = clean;
+  if (field === 'sequence') row.sequence = clean;
+  if (field === 'page') {
+    row.page = clean;
+    currentPage = Number(clean) || currentPage;
+    renderPage();
+  }
+  markDirty();
+  renderRows();
+  renderRawJson();
+}
+
+function renderRawJson() {
+  const box = document.getElementById('rawJson');
+  if (box && currentRow()) box.value = JSON.stringify(currentRow(), null, 2);
+}
+
+function renderSelected() {
+  const row = currentRow();
+  if (!row) {
+    document.getElementById('detail').innerHTML = '<div class="empty">No rows available.</div>';
+    return;
+  }
+  document.getElementById('rowMeta').textContent =
+    `Seq ${row.sequence || '-'} - confidence ${row.row_confidence ?? '-'}`;
+  document.getElementById('detail').innerHTML = `
+    <div class="summary-line">
+      ${riskBadge(row.risk_level)}
+      <span class="pill">${escapeHtml(row.suggested_action || '')}</span>
+    </div>
+    <div class="form-grid">
+      ${fieldInput('sequence', 'Sequence', row, { type: 'number' })}
+      ${fieldInput('page', 'Page', row, { type: 'number' })}
+      ${fieldInput('question_type', 'Question type', row)}
+      ${fieldInput('required', 'Required', row, { select: ['', 'Yes', 'No'] })}
+      ${fieldInput('question_text', 'Question text', row, { large: true })}
+      ${fieldInput('answer_text', 'Answer text', row, { large: true })}
+      ${fieldInput('branching_logic', 'Branching logic', row)}
+      ${fieldInput('answer_validation', 'Answer validation', row)}
+      ${fieldInput('section', 'Section', row)}
+    </div>
+    <div class="advanced-bar">
+      <label class="switch">
+        <input type="checkbox" onchange="toggleAdvanced(this.checked)" />
+        Advanced row data
+      </label>
+      <span class="hint">Use this only when the normal fields are not enough.</span>
+    </div>
+    <div class="raw-box" id="rawBox">
+      <textarea class="raw-json" id="rawJson"></textarea>
+      <div class="raw-actions">
+        <button class="mini-btn" onclick="applyRawJson()">Apply row data</button>
+      </div>
+    </div>
+    <div class="save-row">
+      <span class="status">Editing row ${escapeHtml(selectedIndex + 1)} of
+        ${escapeHtml((manifest.rows || []).length)}</span>
+      <button class="save-btn" onclick="saveManifest()">Save review</button>
+    </div>
+  `;
+  renderRawJson();
+  setHighlight(row, pageByNumber(currentPage));
+}
+
+function toggleAdvanced(open) {
+  document.getElementById('rawBox').classList.toggle('open', open);
+  renderRawJson();
+}
+
+function applyRawJson() {
+  const box = document.getElementById('rawJson');
+  try {
+    const parsed = JSON.parse(box.value);
+    manifest.rows[selectedIndex] = parsed;
+    markDirty('Advanced row data applied');
+    renderRows();
+    renderPage();
+    renderSelected();
+  } catch (err) {
+    const status = document.getElementById('saveStatus');
+    status.textContent = 'Row data is not valid JSON';
+    status.classList.add('error');
+  }
+}
+
+function createBlankRow(pageNo) {
+  const row = {
+    row_id: `manual_${Date.now()}`,
+    row_index: 0,
+    sequence: '',
+    page: pageNo || currentPage,
+    bbox: null,
+    row_confidence: 1,
+    risk_level: 'medium',
+    fields: {},
+    row: {
+      sequence: '',
+      page: pageNo || currentPage,
+      bbox: null,
+      confidence: 1,
+      review_reasons: ['manual_row_added'],
+      section: '',
+      question_type: '',
+      question_text: '',
+      branching_logic: '',
+      answer_text: '',
+      answer_validation: '',
+      required: ''
+    },
+    source: {
+      page_image: '',
+      nearest_text_block: {},
+      manual: true
+    },
+    suggested_action: 'Reviewer added this row'
+  };
+  REVIEW_FIELDS.forEach(field => ensureField(row, field));
+  return row;
+}
+
+function resequenceRows() {
+  (manifest.rows || []).forEach((row, index) => {
+    row.row_index = index;
+    if (!row.row_id) row.row_id = `row_${String(index + 1).padStart(4, '0')}`;
+  });
+}
+
+function addRowAfter(index, event) {
+  event?.stopPropagation();
+  const pageNo = Number(manifest.rows[index]?.page) || currentPage;
+  manifest.rows.splice(index + 1, 0, createBlankRow(pageNo));
+  selectedIndex = index + 1;
+  currentPage = pageNo;
+  resequenceRows();
+  markDirty('New row added');
+  renderRows();
+  renderPage();
+  renderSelected();
+}
+
+function removeRow(index, event) {
+  event?.stopPropagation();
+  if (!manifest.rows.length) return;
+  manifest.rows.splice(index, 1);
+  selectedIndex = Math.max(0, Math.min(selectedIndex, manifest.rows.length - 1));
+  resequenceRows();
+  markDirty('Row removed');
+  renderRows();
+  renderPage();
+  renderSelected();
+}
+
+function setPage(pageNo, selectFirstRow = false) {
+  const page = pageByNumber(pageNo);
+  if (!page) return;
+  currentPage = pageNo;
+  if (selectFirstRow) {
+    const first = rowsOnPage(pageNo)[0];
+    if (first) selectedIndex = first.index;
+  }
+  renderRows();
+  renderPage();
+  renderSelected();
+}
+
+function changePage(delta) {
+  setPage(currentPage + delta, true);
+}
+
+async function saveManifest() {
+  if (!manifest) return;
+  resequenceRows();
+  const status = document.getElementById('saveStatus');
+  status.textContent = 'Saving...';
+  status.classList.remove('error');
+  try {
+    const res = await fetch(`/manifest-data/${jobId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(manifest)
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || 'Save failed');
+    manifest = body.manifest;
+    dirty = false;
+    status.textContent = 'Saved';
+    renderRows();
+    renderPage();
+    renderSelected();
+  } catch (err) {
+    status.textContent = err.message;
+    status.classList.add('error');
+  }
+}
+
+fetch(`/manifest-data/${jobId}`)
+  .then(res => {
+    if (!res.ok) throw new Error('Review manifest is not ready.');
+    return res.json();
+  })
+  .then(data => {
+    manifest = data;
+    const firstRisk = (manifest.rows || []).findIndex(row => row.risk_level !== 'low');
+    selectedIndex = firstRisk >= 0 ? firstRisk : 0;
+    currentPage = Number(currentRow()?.page || manifest.pages?.[0]?.page || 1);
+    renderRows();
+    renderPage();
+    renderSelected();
+  })
+  .catch(err => {
+    document.getElementById('rowList').innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`;
+    document.getElementById('detail').innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`;
+  });
+
+document.getElementById('pdfWrap').addEventListener('wheel', event => {
+  if (Math.abs(event.deltaY) < 20 || wheelLock) return;
+  event.preventDefault();
+  wheelLock = true;
+  changePage(event.deltaY > 0 ? 1 : -1);
+  setTimeout(() => { wheelLock = false; }, 260);
+}, { passive:false });
+</script>
+</body></html>
+"""
+
+
 def _manifest_file(job_id: str) -> Path:
     return OUTPUT_DIR / f"{job_id}_review_manifest.json"
 
@@ -1218,6 +1996,105 @@ def _load_manifest(job_id: str) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+_REVIEW_FIELD_NAMES = (
+    "sequence",
+    "question_type",
+    "question_text",
+    "branching_logic",
+    "answer_text",
+    "answer_validation",
+    "section",
+    "required",
+)
+
+
+def _risk_rank(risk: str) -> int:
+    return {"high": 0, "medium": 1, "low": 2}.get(str(risk or "low").lower(), 2)
+
+
+def _normalize_saved_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("rows"), list):
+        raise HTTPException(400, "Saved review must contain a rows list")
+
+    field_risk_counts: Counter[str] = Counter()
+    reason_counts: Counter[str] = Counter()
+    row_risk_counts: Counter[str] = Counter()
+    rows_needing_review = 0
+    field_count = 0
+
+    for index, row in enumerate(manifest["rows"]):
+        if not isinstance(row, dict):
+            raise HTTPException(400, f"Row {index + 1} is not valid")
+
+        row["row_index"] = index
+        row.setdefault("row_id", f"row_{index + 1:04d}")
+        row.setdefault("fields", {})
+        row.setdefault("row", {})
+
+        for field_name in _REVIEW_FIELD_NAMES:
+            field = row["fields"].setdefault(
+                field_name,
+                {
+                    "field": field_name,
+                    "value": row["row"].get(field_name, ""),
+                    "confidence": 1,
+                    "risk_level": "medium",
+                    "review_reasons": ["manual_review"],
+                    "evidence": {},
+                    "suggested_action": "Reviewer edited this field",
+                },
+            )
+            field.setdefault("field", field_name)
+            field.setdefault("review_reasons", [])
+            field.setdefault("risk_level", "low")
+            row["row"][field_name] = field.get("value", row["row"].get(field_name, ""))
+
+        row["sequence"] = row["row"].get("sequence", row.get("sequence", ""))
+        row["page"] = row["row"].get("page", row.get("page", ""))
+        row["bbox"] = row["row"].get("bbox", row.get("bbox"))
+
+        risks = [
+            str(field.get("risk_level", "low")).lower()
+            for field in row["fields"].values()
+            if isinstance(field, dict)
+        ]
+        row["risk_level"] = min(risks or ["low"], key=_risk_rank)
+        if row["risk_level"] != "low" or float(row.get("row_confidence") or 1) < 0.85:
+            rows_needing_review += 1
+        row_risk_counts[row["risk_level"]] += 1
+
+        for field in row["fields"].values():
+            if not isinstance(field, dict):
+                continue
+            field_count += 1
+            risk = str(field.get("risk_level", "low")).lower()
+            field_risk_counts[risk] += 1
+            reason_counts.update(field.get("review_reasons") or [])
+
+    manifest["summary"] = {
+        **manifest.get("summary", {}),
+        "row_count": len(manifest["rows"]),
+        "rows_needing_review": rows_needing_review,
+        "field_count": field_count,
+        "field_risk_counts": dict(field_risk_counts),
+        "review_reason_counts": dict(reason_counts),
+        "high_risk_rows": row_risk_counts.get("high", 0),
+        "medium_risk_rows": row_risk_counts.get("medium", 0),
+        "low_risk_rows": row_risk_counts.get("low", 0),
+    }
+    manifest["updated_at"] = datetime.now(UTC).isoformat()
+    return manifest
+
+
+def _save_manifest(job_id: str, manifest: dict[str, Any]) -> dict[str, Any]:
+    path = _manifest_file(job_id)
+    if not path.exists():
+        raise HTTPException(404, "Review manifest not ready")
+    manifest = _normalize_saved_manifest(manifest)
+    path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    return manifest
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse(_INDEX_HTML)
@@ -1226,12 +2103,17 @@ def index() -> HTMLResponse:
 @app.get("/workbench/{job_id}", response_class=HTMLResponse)
 def workbench(job_id: str) -> HTMLResponse:
     _load_manifest(job_id)
-    return HTMLResponse(_WORKBENCH_HTML.replace("__JOB_ID__", job_id))
+    return HTMLResponse(_WORKBENCH_EDITOR_HTML.replace("__JOB_ID__", job_id))
 
 
 @app.get("/manifest-data/{job_id}")
 def manifest_data(job_id: str) -> JSONResponse:
     return JSONResponse(_load_manifest(job_id))
+
+
+@app.post("/manifest-data/{job_id}")
+def save_manifest_data(job_id: str, manifest: dict[str, Any]) -> JSONResponse:
+    return JSONResponse({"status": "saved", "manifest": _save_manifest(job_id, manifest)})
 
 
 @app.get("/page-image/{job_id}/{page_no}")
