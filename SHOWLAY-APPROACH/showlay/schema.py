@@ -291,19 +291,21 @@ question_text equal to the column header.
    itself is the ANSWER SPACE of the previous question, not a separate Text Area. Only
    emit a Text Area row when there's a question or label associated with it.
 
-4. Already-present row: do NOT emit the same question twice only when it means the
-   same user-entered fact in the same context. If the same label appears under a
-   different role, branch, table instance, row number, fall instance, or repeated
-   block, emit it again with its local context. Example: four "Date of fall:" blanks
-   for four fall entries are four distinct Date rows. Repeated page headers such as
-   Applicant Name/SSN/DOB remain chrome and are emitted only once.
+4. Already-present row: do NOT emit the same workbook field twice just because the
+   paper repeats capacity slots. If a block prints the same field set for Entry 1,
+   Entry 2, Fall 1, Fall 2, Visit 1, Visit 2, etc., emit each unique field once for
+   the schema. The downstream system captures multiple user-entered instances.
 
-5. Repeated table instances: if a Group Table is visually repeated for multiple
-   real-world instances, keep each instance because the same column label can mean
-   different facts. Only remove a repeat when it is clearly page chrome or the exact
-   same field repeated for the same meaning.
+5. Role/person repeats: keep repeated labels when the local role changes the meaning.
+   Example: Applicant Signature / Applicant Date, Witness Signature / Witness Date,
+   and Service Coordinator Signature / Service Coordinator Date are distinct rows.
+   Include the role in question_text so the repeated "Signature" or "Date" labels
+   are not ambiguous.
 
-6. Question splitting: a multi-line question or paragraph is ONE row. Do NOT split a
+6. Repeated table instances: emit ONE Group Table parent and ONE child row per unique
+   column/field. Do not emit the table again for each printed row or numbered item.
+
+7. Question splitting: a multi-line question or paragraph is ONE row. Do NOT split a
    single labeled question into two Display rows just because the text wraps.
 
 ==== TYPE DISAMBIGUATION (READ CAREFULLY - GLYPH ALONE IS NOT THE SIGNAL) ====
@@ -403,6 +405,16 @@ Use AcroForm widgets as the primary signal when they are present:
   - Do not combine a parent decision and its dependent follow-up controls into one
     Answer Text list. Emit the parent as its own row, then emit each dependent prompt
     as its own child row with branching logic tied to the parent answer.
+
+Repeated blank slots are capacity, not separate workbook fields:
+  - If a table or repeating block prints the same field set for Entry 1, Entry 2,
+    Fall 1, Fall 2, Visit 1, Visit 2, etc., emit each unique field once.
+  - Emit one Group Table parent and one child row per unique column/field. Do not
+    emit the same table again for each printed row or numbered item.
+  - Preserve repeated fields only when the local role/person changes the meaning.
+    For example, Applicant Signature, Witness Signature, and Service Coordinator
+    Signature are distinct rows, and their Date rows are distinct too.
+  - When preserving role/person repeats, put that context in question_text.
 
 Do NOT output or infer any other columns in this extraction step. In particular, do
 NOT output alert, required, auto-populated, pre-populate, history, score, token,

@@ -664,16 +664,190 @@ def normalize_section_header_type(rows: list[Row]) -> list[Row]:
     return rows
 
 
-def dedupe_table_repetitions(rows: list[Row]) -> list[Row]:
-    """Keep repeated table instances unless another pass has true context evidence.
+_INSTANCE_CONTEXT_RE = re.compile(
+    r"\b(?:row|entry|item|line|instance|fall|visit|admission|episode|incident|event|"
+    r"medication|service|diagnosis|condition)\s*(?:#|no\.?|number)?\s*\d+\b"
+    r"|\b\d+\s*(?:st|nd|rd|th)\s+"
+    r"(?:row|entry|item|line|instance|fall|visit|admission|episode|incident|event)\b",
+    re.IGNORECASE,
+)
+_ROLE_CONTEXT_HINT_RE = re.compile(
+    r"\b(applicant|member|representative|witness|coordinator|provider|physician|"
+    r"nurse|guardian|parent|caregiver|case\s*manager|conservator|signatory|"
+    r"director|supervisor|reviewer|approver|authorized|responsible\s+party)\b",
+    re.IGNORECASE,
+)
+_REPEATED_SLOT_TOKEN_RE = re.compile(
+    r"\b(row|entry|item|line|instance|fall|visit|admission|episode|incident|event|"
+    r"medication|service|diagnosis|condition)\s*(?:#|no\.?|number)?\s*\d+\b",
+    re.IGNORECASE,
+)
+_LEADING_ITEM_NUMBER_RE = re.compile(r"^\s*\d+\s*[\).:-]\s*")
+_TRAILING_INSTANCE_NUMBER_RE = re.compile(r"\s*(?:#\s*)?\d+\s*$")
 
-    A visual table repeated for Fall 1, Fall 2, etc. can reuse the same labels
-    ("Date of fall", "Location of Fall") while meaning different facts. The older
-    implementation collapsed by text only, which removed valid repeated fields and
-    could also drop continuation rows on the next page. Header/page-chrome dedupe is
-    still handled by the dedicated page-band passes above.
+
+def _schema_label_key(value: str) -> str:
+    """Normalize a field label for schema-level duplicate detection.
+
+    Repeated data-entry slots often differ only by item number ("Fall 1",
+    "Fall 2", "Entry #3"). Those numbers describe capacity on the paper form, not
+    separate workbook fields, so remove them while preserving role words like
+    "Witness" or "Service Coordinator".
     """
-    return rows
+    s = _strip_for_dedup(value)
+    s = re.sub(r"\s+", " ", s).strip()
+    s = _LEADING_ITEM_NUMBER_RE.sub("", s)
+    s = _REPEATED_SLOT_TOKEN_RE.sub(lambda m: m.group(1).lower(), s)
+    # Strip plain trailing instance numbers only when the remaining label is still
+    # descriptive; this handles "Date of fall 1" without changing short labels like "Q1".
+    if len(s.split()) >= 3:
+        s = _TRAILING_INSTANCE_NUMBER_RE.sub("", s).strip()
+    return s.rstrip(":").strip()
+
+
+def _schema_display_label(value: str) -> str:
+    """Return a readable label with repeated slot numbering removed."""
+    s = (value or "").strip()
+    if "\n" in s:
+        return s
+    had_colon = s.endswith(":")
+    s = _QT_TAIL_RE.sub("", s)
+    s = _AMPM_TAIL_RE.sub("", s)
+    s = _QT_WS_RE.sub(" ", s).strip()
+    s = _LEADING_ITEM_NUMBER_RE.sub("", s)
+    s = _REPEATED_SLOT_TOKEN_RE.sub(lambda m: m.group(1), s)
+    if len(s.split()) >= 3:
+        s = _TRAILING_INSTANCE_NUMBER_RE.sub("", s).strip()
+    s = s.rstrip(":").strip()
+    if had_colon and s:
+        s += ":"
+    return s
+
+
+def _branch_key(value: str) -> str:
+    return _full_normtext(value)
+
+
+def _row_context_kind(role: str) -> str:
+    role = (role or "").strip()
+    if not role:
+        return ""
+    if _INSTANCE_CONTEXT_RE.search(role):
+        return "instance"
+    if _ROLE_CONTEXT_HINT_RE.search(role):
+        return "role"
+    # A short banner immediately before signature/name/date lines is usually a role
+    # even when it uses domain-specific words not listed above.
+    return "role" if len(role.split()) <= 8 else ""
+
+
+def _dedupe_contexts(rows: list[Row]) -> list[dict[str, str]]:
+    contexts: list[dict[str, str]] = []
+    current_role = ""
+    current_role_kind = ""
+    active_table = ""
+
+    for r in rows:
+        qt = (r.question_type or "").strip().lower()
+        txt = (r.question_text or "").strip()
+        contexts.append({
+            "role": current_role,
+            "role_kind": current_role_kind,
+            "table": active_table,
+        })
+
+        if qt == "display" and txt.lower() == "new section":
+            current_role = ""
+            current_role_kind = ""
+            active_table = ""
+            continue
+        if _is_banner(r):
+            current_role, _ = _banner_role(txt)
+            current_role_kind = _row_context_kind(current_role)
+            active_table = ""
+            continue
+        if qt == "group table":
+            active_table = _schema_label_key(txt or r.answer_text)
+            current_role = ""
+            current_role_kind = ""
+            continue
+        if qt in ("radio button", "checkbox group", "dropdown", "drop down", "checkbox"):
+            active_table = ""
+
+    return contexts
+
+
+def _is_generic_repeated_label(row: Row) -> bool:
+    label = _schema_label_key(row.question_text)
+    return label in _GENERIC_LABELS
+
+
+def _dedupe_row_key(row: Row, context: dict[str, str]) -> tuple | None:
+    qt = (row.question_type or "").strip().lower()
+    if qt == "display":
+        return None
+    if qt not in {
+        "group table", "text box", "text area", "date", "number", "signature",
+        "dropdown", "drop down", "radio button", "checkbox group", "checkbox",
+    }:
+        return None
+
+    label = _schema_label_key(row.question_text)
+    if not label:
+        return None
+
+    role_kind = context.get("role_kind", "")
+    role_key = ""
+    if role_kind == "role" and qt != "group table":
+        role_key = _schema_label_key(context.get("role", ""))
+    table_key = "" if qt == "group table" else context.get("table", "")
+
+    # Bare "Date" / "Signature" / "Name" with no role or repeated-instance context
+    # is too ambiguous to collapse. A later review pass already flags it for context.
+    if _is_generic_repeated_label(row) and not role_kind:
+        return None
+
+    return (
+        qt,
+        label,
+        _schema_label_key(row.section),
+        _branch_key(row.branching_logic),
+        table_key,
+        role_key,
+        _full_normtext(row.answer_text),
+        _full_normtext(row.answer_validation),
+    )
+
+
+def dedupe_table_repetitions(rows: list[Row]) -> list[Row]:
+    """Collapse repeated data-entry slots while preserving role-specific repeats.
+
+    Assessment workbooks describe a field schema, not every blank slot printed on a
+    paper form. If the PDF repeats the same field set for Entry/Fall/Visit/Item 1,
+    2, 3, emit the schema rows once. The exception is a repeated label that belongs
+    to different real roles or people, such as Applicant Signature, Witness
+    Signature, and Service Coordinator Date; those remain distinct through the role
+    context or the role-prefixed question text produced by repair_question_text.
+    """
+    contexts = _dedupe_contexts(rows)
+    seen: dict[tuple, Row] = {}
+    out: list[Row] = []
+
+    for i, row in enumerate(rows):
+        key = _dedupe_row_key(row, contexts[i])
+        if key is not None:
+            if key in seen:
+                keeper = seen[key]
+                if (keeper.question_type or "").strip().lower() != "group table":
+                    simplified = _schema_display_label(keeper.question_text)
+                    if simplified and _schema_label_key(simplified) == _schema_label_key(
+                        keeper.question_text
+                    ):
+                        keeper.question_text = simplified
+                continue
+            seen[key] = row
+        out.append(row)
+    return out
 
 
 def _strip_for_dedup(s: str) -> str:
@@ -2342,7 +2516,6 @@ def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> 
     rows = coerce_select_all_choice_groups(rows)
     rows = coerce_question_choice_groups_to_radio(rows)
     rows = separate_answer_validation(rows)
-    rows = dedupe_table_repetitions(rows)              # preserve repeated table instances by context
     rows = dedupe_repeating_headers(rows)
     rows = dedupe_unprefixed_header_aliases(rows)      # drop 'Applicant Name:' page-2 strays
     rows = dedupe_consecutive(rows)
@@ -2365,6 +2538,7 @@ def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> 
     rows = expand_packed_group_table_columns(rows, truth_path)
     rows = resolve_checkbox_branching(rows)
     rows = dedupe_attached_text_children(rows)
+    rows = dedupe_table_repetitions(rows)              # collapse repeated slots; preserve role contexts
     rows = assign_sequence(rows)
     rows = branch_existing_attached_text_children(rows)
     rows = normalize_choice_options(rows)

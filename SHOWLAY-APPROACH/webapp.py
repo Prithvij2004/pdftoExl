@@ -1079,12 +1079,16 @@ let manifest = null;
 let selectedIndex = 0;
 
 function riskClass(risk) {
-  return risk === 'high' ? 'high' : risk === 'medium' ? 'medium' : 'low';
+  const safeRisk = String(risk || 'low').toLowerCase();
+  if (safeRisk === 'high') return 'high';
+  if (safeRisk === 'medium') return 'medium';
+  return 'low';
 }
 
-function riskBadge(risk) {
-  const safeRisk = risk || 'low';
-  return `<span class="risk ${riskClass(safeRisk)}">${safeRisk}</span>`;
+function riskBadge(risk, hideLowRisk = false) {
+  const safeRisk = riskClass(risk);
+  if (hideLowRisk && safeRisk === 'low') return '';
+  return `<span class="risk ${safeRisk}">${safeRisk}</span>`;
 }
 
 function escapeHtml(value) {
@@ -1115,7 +1119,7 @@ function renderRows() {
     <button class="row-btn ${index === selectedIndex ? 'active' : ''}" onclick="selectRow(${index})">
       <div class="row-top">
         <span>Seq ${escapeHtml(row.sequence || '')} · Page ${escapeHtml(row.page || '')}</span>
-        ${riskBadge(row.risk_level)}
+        ${riskBadge(row.risk_level, true)}
       </div>
       <div class="row-text">${escapeHtml(rowTitle(row))}</div>
     </button>
@@ -1278,7 +1282,7 @@ _WORKBENCH_EDITOR_HTML = """<!doctype html>
   .panel-h h2 { margin:0; font-size:15px; color:var(--navy); }
   .hint, .status { color:var(--muted); font-size:12px; }
   .status.error { color:var(--err); }
-  .rows, .detail, .pdf-wrap { min-height:0; overflow:auto; }
+  .rows, .detail, .pdf-wrap { flex:1; min-height:0; overflow:auto; }
   .rows { padding:8px; }
   .row-card {
     width:100%;
@@ -1349,6 +1353,11 @@ _WORKBENCH_EDITOR_HTML = """<!doctype html>
     background:var(--navy);
     color:white;
     border-color:var(--navy);
+  }
+  .save-btn.secondary {
+    background:var(--surface);
+    color:var(--navy);
+    border-color:var(--line-2);
   }
   .pdf-wrap {
     padding:14px;
@@ -1490,6 +1499,7 @@ _WORKBENCH_EDITOR_HTML = """<!doctype html>
   <div class="top-actions">
     <span class="status" id="saveStatus">No changes yet</span>
     <button class="save-btn" onclick="saveManifest()">Save</button>
+    <button class="save-btn secondary" onclick="downloadWorkbook()">Download Excel</button>
     <a href="/">New extraction</a>
   </div>
 </div>
@@ -1497,7 +1507,10 @@ _WORKBENCH_EDITOR_HTML = """<!doctype html>
   <section class="panel">
     <div class="panel-h">
       <h2>Rows</h2>
-      <span class="hint" id="rowCount">Loading</span>
+      <div class="top-actions">
+        <span class="hint" id="rowCount">Loading</span>
+        <button class="mini-btn" id="addRowBtn" type="button">+ Add item</button>
+      </div>
     </div>
     <div class="rows" id="rowList"></div>
   </section>
@@ -1549,12 +1562,16 @@ const REVIEW_FIELDS = [
 ];
 
 function riskClass(risk) {
-  return risk === 'high' ? 'high' : risk === 'medium' ? 'medium' : 'low';
+  const safeRisk = String(risk || 'low').toLowerCase();
+  if (safeRisk === 'high') return 'high';
+  if (safeRisk === 'medium') return 'medium';
+  return 'low';
 }
 
-function riskBadge(risk) {
-  const safeRisk = risk || 'low';
-  return `<span class="risk ${riskClass(safeRisk)}">${safeRisk}</span>`;
+function riskBadge(risk, hideLowRisk = false) {
+  const safeRisk = riskClass(risk);
+  if (hideLowRisk && safeRisk === 'low') return '';
+  return `<span class="risk ${safeRisk}">${safeRisk}</span>`;
 }
 
 function escapeHtml(value) {
@@ -1595,10 +1612,18 @@ function toNumberOrBlank(value) {
 function selectRow(index, syncPage = true) {
   if (!manifest?.rows?.length) return;
   if (index < 0 || index >= manifest.rows.length) return;
+  const row = manifest.rows[index];
+  const nextPage = syncPage && row?.page ? Number(row.page) : currentPage;
+  const selectionChanged = selectedIndex !== index;
+  const pageChanged = Number(currentPage) !== Number(nextPage);
+  if (!selectionChanged && !pageChanged) {
+    scrollSelectedRowIntoView();
+    return;
+  }
   selectedIndex = index;
-  const row = currentRow();
-  if (syncPage && row?.page) currentPage = Number(row.page);
+  if (pageChanged) currentPage = nextPage;
   renderRows();
+  scrollSelectedRowIntoView();
   renderPage();
   renderSelected();
 }
@@ -1607,28 +1632,49 @@ function renderRows() {
   const rows = manifest.rows || [];
   document.getElementById('rowCount').textContent =
     `${rows.length} rows - ${manifest.summary?.rows_needing_review || 0} need review`;
+  if (!rows.length) {
+    document.getElementById('rowList').innerHTML =
+      '<div class="empty">No rows yet. Use Add item to create a field.</div>';
+    return;
+  }
   document.getElementById('rowList').innerHTML = rows.map((row, index) => `
     <div class="row-card ${index === selectedIndex ? 'active' : ''}"
-         data-row-index="${index}"
-         onmouseenter="selectRow(${index})">
+         data-row-index="${index}">
       <div class="row-top">
         <span>Seq ${escapeHtml(fieldValue(row, 'sequence') || row.sequence || '')}
           - Page ${escapeHtml(row.page || fieldValue(row, 'page') || '')}</span>
-        ${riskBadge(row.risk_level)}
+        ${riskBadge(row.risk_level, true)}
       </div>
       <div class="row-text">${escapeHtml(rowTitle(row))}</div>
       <div class="row-actions">
-        <button class="mini-btn" onclick="addRowAfter(${index}, event)">+ Add after</button>
-        <button class="mini-btn danger" onclick="removeRow(${index}, event)">Remove</button>
+        <button class="mini-btn" type="button" data-row-action="add" data-row-index="${index}">+ Add after</button>
+        <button class="mini-btn danger" type="button" data-row-action="remove" data-row-index="${index}">Remove</button>
       </div>
     </div>
   `).join('');
-  scrollActiveRow();
 }
 
-function scrollActiveRow() {
-  const active = document.querySelector('.row-card.active');
-  active?.scrollIntoView({ block: 'nearest' });
+function scrollSelectedRowIntoView() {
+  requestAnimationFrame(() => {
+    const rowList = document.getElementById('rowList');
+    const active = rowList?.querySelector('.row-card.active');
+    if (!rowList || !active) return;
+
+    const listRect = rowList.getBoundingClientRect();
+    const activeRect = active.getBoundingClientRect();
+    const isVisible = activeRect.top >= listRect.top && activeRect.bottom <= listRect.bottom;
+    if (isVisible) return;
+
+    rowList.scrollTop = Math.max(
+      0,
+      rowList.scrollTop + activeRect.top - listRect.top -
+        ((rowList.clientHeight - activeRect.height) / 2)
+    );
+  });
+}
+
+function rowPage(row) {
+  return Number(row?.page || fieldValue(row, 'page') || currentPage) || currentPage;
 }
 
 function bestRect(row) {
@@ -1694,7 +1740,7 @@ function renderPage() {
     return;
   }
   document.getElementById('pageMeta').textContent =
-    `Page ${page.page} - hover a box to select the row`;
+    `Page ${page.page} - click a box to select the row`;
   img.onload = () => setHighlight(currentRow(), page);
   img.src = `/page-image/${jobId}/${page.page}`;
   layer.innerHTML = rowsOnPage(page.page).map(({ row, index }) => {
@@ -1703,9 +1749,6 @@ function renderPage() {
     return `<div class="bbox ${index === selectedIndex ? 'active' : ''}"
       title="${escapeHtml(rowTitle(row))}"
       style="${rectStyle(rect, page)}"
-      onmouseenter="selectRow(${index}, false)"
-      onmouseover="selectRow(${index}, false)"
-      onmousemove="selectRow(${index}, false)"
       onclick="selectRow(${index}, false)"></div>`;
   }).join('');
   setHighlight(currentRow(), page);
@@ -1887,27 +1930,43 @@ function resequenceRows() {
   });
 }
 
-function addRowAfter(index, event) {
-  event?.stopPropagation();
-  const pageNo = Number(manifest.rows[index]?.page) || currentPage;
-  manifest.rows.splice(index + 1, 0, createBlankRow(pageNo));
-  selectedIndex = index + 1;
+function addRowAfter(index = selectedIndex) {
+  if (!manifest) return;
+  manifest.rows = manifest.rows || [];
+  const numericIndex = Number(index);
+  const safeIndex = manifest.rows.length
+    ? Math.max(-1, Math.min(Number.isFinite(numericIndex) ? numericIndex : selectedIndex, manifest.rows.length - 1))
+    : -1;
+  const pageNo = rowPage(manifest.rows[safeIndex]);
+  const insertAt = safeIndex + 1;
+  manifest.rows.splice(insertAt, 0, createBlankRow(pageNo));
+  selectedIndex = insertAt;
   currentPage = pageNo;
   resequenceRows();
   markDirty('New row added');
   renderRows();
+  scrollSelectedRowIntoView();
   renderPage();
   renderSelected();
 }
 
-function removeRow(index, event) {
-  event?.stopPropagation();
-  if (!manifest.rows.length) return;
-  manifest.rows.splice(index, 1);
-  selectedIndex = Math.max(0, Math.min(selectedIndex, manifest.rows.length - 1));
+function removeRow(index) {
+  if (!manifest?.rows?.length) return;
+  const safeIndex = Number(index);
+  if (!Number.isInteger(safeIndex) || safeIndex < 0 || safeIndex >= manifest.rows.length) return;
+  const removedSelected = safeIndex === selectedIndex;
+  const removedBeforeSelected = safeIndex < selectedIndex;
+  manifest.rows.splice(safeIndex, 1);
+  if (removedBeforeSelected) {
+    selectedIndex -= 1;
+  } else if (removedSelected) {
+    selectedIndex = Math.min(safeIndex, manifest.rows.length - 1);
+  }
+  selectedIndex = Math.max(0, selectedIndex);
   resequenceRows();
   markDirty('Row removed');
   renderRows();
+  scrollSelectedRowIntoView();
   renderPage();
   renderSelected();
 }
@@ -1921,6 +1980,7 @@ function setPage(pageNo, selectFirstRow = false) {
     if (first) selectedIndex = first.index;
   }
   renderRows();
+  if (selectFirstRow) scrollSelectedRowIntoView();
   renderPage();
   renderSelected();
 }
@@ -1929,7 +1989,30 @@ function changePage(delta) {
   setPage(currentPage + delta, true);
 }
 
-async function saveManifest() {
+document.getElementById('addRowBtn').addEventListener('click', event => {
+  event.preventDefault();
+  addRowAfter(selectedIndex);
+});
+
+document.getElementById('rowList').addEventListener('click', event => {
+  const actionButton = event.target.closest('[data-row-action]');
+  if (actionButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    const index = Number(actionButton.dataset.rowIndex);
+    if (actionButton.dataset.rowAction === 'add') {
+      addRowAfter(index);
+    } else if (actionButton.dataset.rowAction === 'remove') {
+      removeRow(index);
+    }
+    return;
+  }
+
+  const rowCard = event.target.closest('.row-card[data-row-index]');
+  if (rowCard) selectRow(Number(rowCard.dataset.rowIndex));
+});
+
+async function saveManifest(successMessage = 'Saved and output updated') {
   if (!manifest) return;
   resequenceRows();
   const status = document.getElementById('saveStatus');
@@ -1945,14 +2028,30 @@ async function saveManifest() {
     if (!res.ok) throw new Error(body.detail || 'Save failed');
     manifest = body.manifest;
     dirty = false;
-    status.textContent = 'Saved and output updated';
+    status.textContent = successMessage;
     renderRows();
     renderPage();
     renderSelected();
+    return body;
   } catch (err) {
     status.textContent = err.message;
     status.classList.add('error');
+    return null;
   }
+}
+
+async function downloadWorkbook() {
+  if (!manifest) return;
+  const body = await saveManifest('Saved. Starting workbook download...');
+  if (!body) return;
+  const status = document.getElementById('saveStatus');
+  const link = document.createElement('a');
+  link.href = `/download/${jobId}?t=${Date.now()}`;
+  link.download = '';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  status.textContent = 'Workbook download started';
 }
 
 fetch(`/manifest-data/${jobId}`)
@@ -1968,6 +2067,7 @@ fetch(`/manifest-data/${jobId}`)
     renderRows();
     renderPage();
     renderSelected();
+    scrollSelectedRowIntoView();
   })
   .catch(err => {
     document.getElementById('rowList').innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`;
@@ -2226,11 +2326,12 @@ def status(job_id: str) -> JSONResponse:
 @app.get("/download/{job_id}")
 def download(job_id: str):
     job = JOBS.get(job_id)
-    if not job or job.get("status") != "done":
+    output_path = OUTPUT_DIR / f"{job_id}.xlsx"
+    if not output_path.is_file():
         raise HTTPException(404, "Not ready")
     return FileResponse(
-        OUTPUT_DIR / f"{job_id}.xlsx",
-        filename=job.get("download_name", "output.xlsx"),
+        output_path,
+        filename=job.get("download_name", f"{job_id}.xlsx") if job else f"{job_id}.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
