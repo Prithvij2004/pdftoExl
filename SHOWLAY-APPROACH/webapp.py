@@ -677,6 +677,16 @@ _INDEX_HTML = """<!doctype html>
         </div>
         <div class="dl-arrow">↓</div>
       </a>
+      <a class="dl" id="dlWorkbench" href="">
+        <div class="dl-icon coral">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M10 4v16M14 9h4M14 13h4M14 17h2"/></svg>
+        </div>
+        <div class="dl-body">
+          <div class="dl-title">Review workbench</div>
+          <div class="dl-meta">Side-by-side PDF page evidence and field-level JSON</div>
+        </div>
+        <div class="dl-arrow">→</div>
+      </a>
       <a class="dl" id="dlManifest" href="">
         <div class="dl-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8M8 17h5"/></svg>
@@ -804,6 +814,7 @@ function showResults(jobId, j) {
   document.getElementById('dlMainSub').textContent =
     j.row_count + ' rows · ' + j.elapsed_s + 's · ' + j.page_count + ' pages';
   document.getElementById('dlReview').href = '/review/' + jobId;
+  document.getElementById('dlWorkbench').href = '/workbench/' + jobId;
   document.getElementById('dlManifest').href = '/manifest/' + jobId;
   document.getElementById('dlManifestSub').textContent =
     (j.rows_needing_review || 0) + ' rows need review · ' +
@@ -820,9 +831,419 @@ function showError(msg) {
 """
 
 
+_WORKBENCH_HTML = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8" />
+<title>SHOWLAY · Review Workbench</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --navy: #001E60;
+    --blue: #2855A6;
+    --coral: #E35D5B;
+    --bg: #F7F8FB;
+    --surface: #FFFFFF;
+    --surface-2: #F2F4F9;
+    --line: #E2E6EE;
+    --text: #0E1F4D;
+    --muted: #5B6B8C;
+    --ok: #00875A;
+    --warn: #B25E00;
+    --err: #C8102E;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .top {
+    height: 56px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 18px;
+  }
+  .brand { font-weight: 750; color: var(--navy); }
+  .top a { color: var(--blue); text-decoration: none; font-weight: 650; }
+  .shell {
+    display: grid;
+    grid-template-columns: 300px minmax(360px, 1fr) minmax(420px, 0.9fr);
+    gap: 12px;
+    height: calc(100vh - 56px);
+    padding: 12px;
+  }
+  .panel {
+    min-height: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel-h {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .panel-h h2 {
+    margin: 0;
+    font-size: 15px;
+    color: var(--navy);
+  }
+  .hint { color: var(--muted); font-size: 12px; }
+  .rows {
+    overflow: auto;
+    padding: 8px;
+  }
+  .row-btn {
+    width: 100%;
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: 7px;
+    text-align: left;
+    padding: 10px;
+    cursor: pointer;
+    color: var(--text);
+    font: inherit;
+  }
+  .row-btn:hover { background: var(--surface-2); }
+  .row-btn.active {
+    background: #E8EDF7;
+    border-color: #CBD3E0;
+  }
+  .row-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+  .risk {
+    border-radius: 999px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 750;
+    text-transform: uppercase;
+  }
+  .risk.high { background: #FBD3D3; color: var(--err); }
+  .risk.medium { background: #FFF2C7; color: var(--warn); }
+  .risk.low { background: #D6F5D6; color: var(--ok); }
+  .row-text {
+    font-size: 13px;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .pdf-wrap {
+    min-height: 0;
+    overflow: auto;
+    padding: 14px;
+    background: #E9EDF4;
+  }
+  .page-frame {
+    position: relative;
+    width: min(100%, 860px);
+    margin: 0 auto;
+    background: white;
+    box-shadow: 0 10px 30px rgba(14,31,77,.18);
+  }
+  .page-frame img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .hl {
+    position: absolute;
+    border: 2px solid var(--coral);
+    background: rgba(227,93,91,.16);
+    box-shadow: 0 0 0 9999px rgba(0,30,96,.08);
+    display: none;
+    pointer-events: none;
+  }
+  .detail {
+    overflow: auto;
+    padding: 14px;
+    gap: 12px;
+    display: flex;
+    flex-direction: column;
+  }
+  .summary-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  .pill {
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td {
+    border-bottom: 1px solid var(--line);
+    padding: 8px 6px;
+    vertical-align: top;
+    text-align: left;
+  }
+  th { color: var(--muted); font-size: 12px; }
+  .value {
+    max-width: 260px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  pre {
+    margin: 0;
+    padding: 12px;
+    background: #101828;
+    color: #E5E7EB;
+    border-radius: 8px;
+    overflow: auto;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .empty {
+    padding: 18px;
+    color: var(--muted);
+  }
+  @media (max-width: 1100px) {
+    .shell { grid-template-columns: 260px 1fr; }
+    .panel.detail-panel { grid-column: 1 / -1; }
+  }
+  @media (max-width: 760px) {
+    .shell {
+      grid-template-columns: 1fr;
+      height: auto;
+    }
+    .panel { min-height: 380px; }
+  }
+</style>
+</head><body>
+<div class="top">
+  <div class="brand">SHOWLAY · Review Workbench</div>
+  <a href="/">New extraction</a>
+</div>
+<main class="shell">
+  <section class="panel">
+    <div class="panel-h">
+      <h2>Rows</h2>
+      <span class="hint" id="rowCount">Loading</span>
+    </div>
+    <div class="rows" id="rowList"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-h">
+      <h2>PDF page</h2>
+      <span class="hint" id="pageMeta"></span>
+    </div>
+    <div class="pdf-wrap">
+      <div class="page-frame" id="pageFrame">
+        <img id="pageImg" alt="PDF page evidence" />
+        <div class="hl" id="highlight"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel detail-panel">
+    <div class="panel-h">
+      <h2>JSON output</h2>
+      <span class="hint" id="rowMeta"></span>
+    </div>
+    <div class="detail" id="detail"></div>
+  </section>
+</main>
+
+<script>
+const jobId = "__JOB_ID__";
+let manifest = null;
+let selectedIndex = 0;
+
+function riskClass(risk) {
+  return risk === 'high' ? 'high' : risk === 'medium' ? 'medium' : 'low';
+}
+
+function riskBadge(risk) {
+  const safeRisk = risk || 'low';
+  return `<span class="risk ${riskClass(safeRisk)}">${safeRisk}</span>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function rowTitle(row) {
+  const qtype = row.row?.question_type || '';
+  const text = row.row?.question_text || '';
+  return `${qtype}${qtype && text ? ' · ' : ''}${text}`;
+}
+
+function selectRow(index) {
+  selectedIndex = index;
+  renderRows();
+  renderSelected();
+}
+
+function renderRows() {
+  const rows = manifest.rows || [];
+  document.getElementById('rowCount').textContent =
+    `${rows.length} rows · ${manifest.summary?.rows_needing_review || 0} need review`;
+  document.getElementById('rowList').innerHTML = rows.map((row, index) => `
+    <button class="row-btn ${index === selectedIndex ? 'active' : ''}" onclick="selectRow(${index})">
+      <div class="row-top">
+        <span>Seq ${escapeHtml(row.sequence || '')} · Page ${escapeHtml(row.page || '')}</span>
+        ${riskBadge(row.risk_level)}
+      </div>
+      <div class="row-text">${escapeHtml(rowTitle(row))}</div>
+    </button>
+  `).join('');
+}
+
+function bestRect(row, page) {
+  const rowBox = row.bbox;
+  if (Array.isArray(rowBox) && rowBox.length === 4) return rowBox;
+  const sourceRect = row.source?.nearest_text_block?.rect;
+  if (Array.isArray(sourceRect) && sourceRect.length === 4) return sourceRect;
+  const fieldRect = row.fields?.question_text?.evidence?.rect;
+  if (Array.isArray(fieldRect) && fieldRect.length === 4) return fieldRect;
+  return null;
+}
+
+function setHighlight(row, page) {
+  const hl = document.getElementById('highlight');
+  const rect = bestRect(row, page);
+  if (!rect || !page?.width || !page?.height) {
+    hl.style.display = 'none';
+    return;
+  }
+  const [x0, y0, x1, y1] = rect.map(Number);
+  hl.style.left = `${100 * x0 / page.width}%`;
+  hl.style.top = `${100 * y0 / page.height}%`;
+  hl.style.width = `${100 * Math.max(1, x1 - x0) / page.width}%`;
+  hl.style.height = `${100 * Math.max(1, y1 - y0) / page.height}%`;
+  hl.style.display = 'block';
+}
+
+function fieldRows(row) {
+  const fields = row.fields || {};
+  return Object.values(fields).map(field => `
+    <tr>
+      <td>${escapeHtml(field.field)}</td>
+      <td>${riskBadge(field.risk_level)}</td>
+      <td>${escapeHtml(field.confidence)}</td>
+      <td class="value">${escapeHtml(field.value)}</td>
+      <td class="value">${escapeHtml((field.review_reasons || []).join('; '))}</td>
+    </tr>
+  `).join('');
+}
+
+function renderSelected() {
+  const row = manifest.rows[selectedIndex];
+  if (!row) {
+    document.getElementById('detail').innerHTML = '<div class="empty">No rows available.</div>';
+    return;
+  }
+  const page = (manifest.pages || []).find(p => Number(p.page) === Number(row.page));
+  document.getElementById('pageMeta').textContent =
+    `Page ${row.page || '-'} · ${page?.text_blocks?.length || 0} text blocks · ${page?.widgets?.length || 0} widgets`;
+  document.getElementById('rowMeta').textContent =
+    `Seq ${row.sequence || '-'} · confidence ${row.row_confidence ?? '-'}`;
+  const img = document.getElementById('pageImg');
+  img.onload = () => setHighlight(row, page);
+  img.src = row.page ? `/page-image/${jobId}/${row.page}` : '';
+  setHighlight(row, page);
+
+  document.getElementById('detail').innerHTML = `
+    <div class="summary-line">
+      ${riskBadge(row.risk_level)}
+      <span class="pill">${escapeHtml(row.suggested_action || '')}</span>
+    </div>
+    <table>
+      <thead><tr><th>Field</th><th>Risk</th><th>Conf</th><th>Value</th><th>Reasons</th></tr></thead>
+      <tbody>${fieldRows(row)}</tbody>
+    </table>
+    <pre>${escapeHtml(JSON.stringify(row, null, 2))}</pre>
+  `;
+}
+
+fetch(`/manifest-data/${jobId}`)
+  .then(res => {
+    if (!res.ok) throw new Error('Review manifest is not ready.');
+    return res.json();
+  })
+  .then(data => {
+    manifest = data;
+    const firstRisk = (manifest.rows || []).findIndex(row => row.risk_level !== 'low');
+    selectedIndex = firstRisk >= 0 ? firstRisk : 0;
+    renderRows();
+    renderSelected();
+  })
+  .catch(err => {
+    document.getElementById('rowList').innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`;
+    document.getElementById('detail').innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`;
+  });
+</script>
+</body></html>
+"""
+
+
+def _manifest_file(job_id: str) -> Path:
+    return OUTPUT_DIR / f"{job_id}_review_manifest.json"
+
+
+def _load_manifest(job_id: str) -> dict[str, Any]:
+    path = _manifest_file(job_id)
+    if not path.exists():
+        raise HTTPException(404, "Review manifest not ready")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse(_INDEX_HTML)
+
+
+@app.get("/workbench/{job_id}", response_class=HTMLResponse)
+def workbench(job_id: str) -> HTMLResponse:
+    _load_manifest(job_id)
+    return HTMLResponse(_WORKBENCH_HTML.replace("__JOB_ID__", job_id))
+
+
+@app.get("/manifest-data/{job_id}")
+def manifest_data(job_id: str) -> JSONResponse:
+    return JSONResponse(_load_manifest(job_id))
+
+
+@app.get("/page-image/{job_id}/{page_no}")
+def page_image(job_id: str, page_no: int):
+    manifest = _load_manifest(job_id)
+    page = next((p for p in manifest.get("pages", []) if int(p.get("page") or 0) == page_no), None)
+    if not page:
+        raise HTTPException(404, "Page not found")
+    image_path = Path(page.get("image_path") or "")
+    if not image_path.exists():
+        raise HTTPException(404, "Page image not found")
+    return FileResponse(image_path, media_type="image/png")
 
 
 @app.post("/extract")
