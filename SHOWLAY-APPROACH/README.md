@@ -1,68 +1,203 @@
-# SHOWLAY-APPROACH — PDF → 28-column Assessment Excel
+# SHOWLAY-APPROACH - PDF to 28-column Assessment Excel
 
-Built 2026-05-07. Targets ≥90% row accuracy with confidence flagging for human review.
+SHOWLAY converts assessment PDFs into the target 28-column Excel format, using
+PDF structure, page images, a Bedrock-hosted VLM, post-processing, confidence
+scoring, and review outputs.
 
-## Why this exists
+## Setup
 
-The three existing branches (agentic-pydantic-ai, chunk-approach, sequence-sections) sit at <50% accuracy. The audit found a structural cap: they each emit only 5–7 of the 28 target columns, miss all 8 Yes/No flag columns, ignore AcroForm widgets, never expose confidence, and can't handle drastically different PDFs.
+### 1. Create and activate a Python environment
 
-## Approach: multi-evidence hybrid + confidence gating
+From this folder:
 
-```
-PDF
- │
- ├─ probe          (AcroForm? scanned? table-heavy? page count → routing)
- ├─ rasterize      (200 DPI PNG per page; reused by VLM)
- ├─ widgets        (PyMuPDF AcroForm walk → bboxes + field-types when interactive)
- ├─ text_layout    (PyMuPDF get_text("dict") → words with bboxes — coordinate-grounded text)
- │
- ├─ VLM extract    (Qwen3-VL-235B on Bedrock, one call per page, 28-column JSON schema in prompt;
- │                   structural hints from widgets + layout passed in as context)
- │
- ├─ post-process   (section forward-fill from "New Section" Display rows;
- │                   sequence assignment by visual reading order;
- │                   branching DSL normalization — REDCap-style "If Q<n> = checked(selected)")
- │
- ├─ confidence     (schema gate, span grounding, structural agreement → per-row confidence + review_reasons)
- │
- └─ write          (28-column Excel from source-template; companion *_review.xlsx for human queue)
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
-Verifier pass with Claude Haiku 4.5 reserved for v2 — v1 ships baseline first.
+If PowerShell blocks activation, run this once in the same terminal:
 
-## Key decisions (with sources)
-
-- **Primary VLM = Qwen3-VL-235B on Bedrock us-west-2** — cheap, strong OCR, in-region inference. Verified live `qwen.qwen3-vl-235b-a22b` model card, 15s/page tested.
-- **Verifier = Claude Haiku 4.5** — has native PDF document block, cheap, good at schema-locked output.
-- **No native PDF for Qwen3-VL** — must rasterize ourselves; Converse caps at 5 images per call so we batch by page.
-- **REDCap-style branching DSL** — `[Q<seq>] = '<value>'` is the lingua franca of healthcare assessment platforms; our gold uses the variant `If Q<seq> = checked(selected)` and `Display if Q<seq> = <literal>`.
-- **Section forward-fill from "New Section" Display rows** — discovered in CHOICES gold: a Display row with `Question Text == "New Section"` and section title in `Answer Text` is the section delimiter. Subsequent rows have blank Section.
-
-## Structure
-
-```
-SHOWLAY-APPROACH/
-├── .env                      # AWS creds, model IDs
-├── README.md                 # this file
-├── run.py                    # end-to-end CLI: python run.py <pdf> <truth_xlsx> [--out <name>]
-├── showlay/
-│   ├── schema.py             # 28-column Pydantic models + enums + DSL
-│   ├── extract.py            # probe + rasterize + widgets + Qwen3-VL extraction
-│   ├── postprocess.py        # section/sequence/branching post-passes
-│   ├── confidence.py         # per-row confidence aggregation
-│   ├── writer.py             # template-based 28-column Excel writer
-│   └── eval.py               # truth comparison + accuracy report
-├── runtime/
-│   ├── page_images/          # 200 DPI PNGs per page
-│   ├── extracted/            # raw VLM JSON per page
-│   └── output/               # final XLSX + review sidecar
-└── eval_reports/             # markdown + JSON eval reports
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
 ```
 
-## Run
+Then run the activation command again.
 
-```bash
-cd "SHOWLAY-APPROACH"
-python run.py "..\SOURCE AND TARGET FILES\sph_rev25-3_H1700-3_final_approved 1.pdf" \
+### 2. Configure environment variables
+
+Copy the example file and fill in the real Bedrock credentials:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Required values:
+
+```env
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION=us-west-2
+BEDROCK_VLM_MODEL_ID=qwen.qwen3-vl-235b-a22b
+```
+
+The app loads `.env` automatically from this folder.
+
+### 3. Confirm template files are available
+
+The command-line runner requires a template or truth workbook path as its second
+argument. The web app looks for a default template in one of these locations:
+
+```text
+..\docs\support_docs\CHOICES Safety Determination Request Form Final_11_20.xlsx
+..\SOURCE AND TARGET FILES\CHOICES Safety Determination Request Form Final_11_20 1.xlsx
+```
+
+## Run the Application
+
+### Option A: Local web app
+
+Start the web app:
+
+```powershell
+python webapp.py
+```
+
+Open:
+
+```text
+http://localhost:8000
+```
+
+Upload a PDF in the browser. The app shows extraction progress and provides
+downloads for the generated workbook, review workbook, and review manifest.
+
+Web outputs are written under:
+
+```text
+runtime\output_web\
+```
+
+### Option B: Single PDF from the command line
+
+Run the end-to-end pipeline with a source PDF and a truth/template workbook:
+
+```powershell
+python run.py "..\SOURCE AND TARGET FILES\sph_rev25-3_H1700-3_final_approved 1.pdf" `
               "..\SOURCE AND TARGET FILES\TX LTSS - 1700-3, Individual Service Plan - Signature Page 1.xlsx"
 ```
+
+Useful flags:
+
+```powershell
+python run.py <pdf_path> <truth_xlsx> --name <output_stem>
+python run.py <pdf_path> <truth_xlsx> --no-eval
+python run.py <pdf_path> <truth_xlsx> --dpi 200
+```
+
+CLI outputs are written under:
+
+```text
+runtime\output\<output_stem>\
+eval_reports\<output_stem>\
+```
+
+### Option C: Batch run for the configured new PDFs
+
+`run_new_pdfs.py` is preconfigured for the three PDFs listed in the script. It
+uses the CHOICES workbook as the output template and skips evaluation.
+
+```powershell
+python run_new_pdfs.py
+```
+
+Before using it, confirm the expected source PDFs exist under:
+
+```text
+..\new pdf files\
+```
+
+## Output Files
+
+For a normal CLI run, the output folder contains:
+
+```text
+<stem>.xlsx                 final 28-column workbook
+<stem>_review.xlsx          companion human-review workbook
+<stem>_review_manifest.json field-level review artifact with page evidence
+<stem>_raw_vlm.json         raw per-page VLM JSON for debugging
+<stem>_telemetry.json       per-page latency and token usage
+```
+
+If evaluation is enabled, `eval_reports\<stem>\` also contains:
+
+```text
+summary.json
+summary.md
+```
+
+## Folder Structure
+
+```text
+SHOWLAY-APPROACH/
+|-- .env                      local AWS and model configuration, gitignored
+|-- .env.example              environment variable template
+|-- README.md                 this file
+|-- ARCHITECTURE_WORKFLOW.md  detailed architecture and workflow notes
+|-- RESULTS.md                evaluation notes and results
+|-- run.py                    end-to-end CLI runner
+|-- run_new_pdfs.py           batch runner for the configured new PDFs
+|-- webapp.py                 local FastAPI upload app
+|-- requirements.txt          Python dependencies
+|-- compare_agentic.py        comparison helper
+|-- diff_truth.py             truth workbook diff helper
+|-- replay_postprocess.py     post-processing replay helper
+|-- showlay/
+|   |-- schema.py             28-column Pydantic models, enums, and DSL
+|   |-- extract.py            probe, rasterize, widgets, and VLM extraction
+|   |-- postprocess.py        section, sequence, and branching post-passes
+|   |-- confidence.py         per-row confidence aggregation
+|   |-- field_review.py       field-level review manifest generation
+|   |-- writer.py             template-based Excel writer
+|   `-- eval.py               truth comparison and accuracy report
+`-- runtime/
+    |-- page_images/          generated 200 DPI page PNGs
+    |-- extracted/            raw extraction artifacts
+    |-- output/               CLI and batch output workbooks
+    |-- uploads_web/          web-uploaded PDFs
+    |-- output_web/           web app outputs
+    `-- page_images_web/      web app page PNGs
+```
+
+## How It Works
+
+The pipeline combines several evidence sources instead of relying on one PDF
+parser:
+
+```text
+PDF
+ |
+ |-- probe          AcroForm, scanned/table-heavy signals, page count
+ |-- rasterize      200 DPI PNG per page for VLM input
+ |-- widgets        PyMuPDF AcroForm walk with bounding boxes and field types
+ |-- text_layout    PyMuPDF coordinate-grounded text extraction
+ |
+ |-- VLM extract    Qwen3-VL on Bedrock, one call per page, 28-column JSON schema
+ |
+ |-- post-process   section forward-fill, sequence assignment, branching cleanup
+ |
+ |-- confidence     schema gate, span grounding, structural agreement
+ |
+ `-- write          final Excel workbook plus review sidecar
+```
+
+## Notes
+
+- Primary VLM: `qwen.qwen3-vl-235b-a22b` on Bedrock in `us-west-2`.
+- Qwen3-VL does not accept native PDF input here, so pages are rasterized before
+  extraction.
+- The optional verifier model is configured in `.env.example` but reserved for a
+  later verifier pass.
+- The target branching format is normalized toward REDCap-style expressions such
+  as `If Q<n> = checked(selected)`.
