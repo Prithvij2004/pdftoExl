@@ -572,6 +572,63 @@ def test_compound_signature_labels_use_local_repeated_field_bbox():
     )
 
 
+def test_inline_text_block_labels_get_distinct_ordered_bboxes():
+    page = _page("Applicant Name: __________________   SSN: __________   DOB: __________")
+    page.text_blocks[0]["rect"] = [36, 116, 578, 128]
+    doc = FakeDoc(pages=[page])
+    rows = [
+        _row(sequence=1, question_type="Text Box", question_text="Applicant Name:"),
+        _row(sequence=2, question_type="Text Box", question_text="SSN:"),
+        _row(sequence=3, question_type="Date", question_text="DOB:"),
+    ]
+
+    manifest = build_review_manifest(rows, doc_struct=doc)
+    rects = [row["source"]["nearest_text_block"]["rect"] for row in manifest["rows"]]
+
+    assert rects[0] != rects[1] != rects[2]
+    assert rects[0][0] < rects[1][0] < rects[2][0]
+    assert all(
+        row["source"]["nearest_text_block"]["evidence_source"] == "text_span"
+        for row in manifest["rows"]
+    )
+
+
+def test_repeated_same_label_uses_next_matching_bbox_in_row_order():
+    page = _page(
+        "Lives in own home/apt (with others)—specify relationship __________________",
+        "Lives in other’s home—specify relationship __________________",
+    )
+    page.text_blocks[0]["rect"] = [64, 318, 528, 331]
+    page.text_blocks[1]["rect"] = [64, 332, 526, 345]
+    doc = FakeDoc(pages=[page])
+    rows = [
+        _row(sequence=1, question_type="Text Box", question_text="Specify Relationship"),
+        _row(sequence=2, question_type="Text Box", question_text="Specify Relationship"),
+    ]
+
+    manifest = build_review_manifest(rows, doc_struct=doc)
+
+    assert manifest["rows"][0]["source"]["nearest_text_block"]["rect"][1] == 318
+    assert manifest["rows"][1]["source"]["nearest_text_block"]["rect"][1] == 332
+
+
+def test_reverse_specify_label_prefers_matching_line_not_same_tokens_elsewhere():
+    page = _page(
+        "Lives in other’s home—specify relationship __________________",
+        "Other—specify______________________________________________",
+    )
+    page.text_blocks[0]["rect"] = [64, 332, 526, 345]
+    page.text_blocks[1]["rect"] = [64, 372, 525, 385]
+    doc = FakeDoc(pages=[page])
+
+    manifest = build_review_manifest(
+        [_row(sequence=1, question_type="Text Box", question_text="Specify Other")],
+        doc_struct=doc,
+    )
+
+    assert manifest["rows"][0]["source"]["nearest_text_block"]["rect"][1] == 372
+
+
 def test_write_review_manifest_round_trips_json(tmp_path):
     doc = FakeDoc(pages=[_page("Applicant Name")])
     manifest = build_review_manifest([_row()], doc_struct=doc, run_id="round-trip")

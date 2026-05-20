@@ -63,6 +63,48 @@ def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, _norm(a), _norm(b)).ratio()
 
 
+def _word_spans(value: str) -> list[tuple[str, int, int]]:
+    return [(match.group(0).lower(), match.start(), match.end()) for match in re.finditer(r"[a-z0-9]+", value.lower())]
+
+
+def _query_sequences(query: str) -> list[list[str]]:
+    tokens = [token for token, _, _ in _word_spans(query)]
+    if not tokens:
+        return []
+    sequences = [tokens]
+    if tokens[0] == "specify" and len(tokens) > 1:
+        sequences.insert(0, tokens[1:] + ["specify"])
+    return sequences
+
+
+def _find_token_span(query: str, text: str) -> tuple[int, int] | None:
+    words = _word_spans(text)
+    if not words:
+        return None
+    for sequence in _query_sequences(query):
+        if len(sequence) > len(words):
+            continue
+        for start_idx in range(0, len(words) - len(sequence) + 1):
+            window = words[start_idx : start_idx + len(sequence)]
+            if [word for word, _, _ in window] == sequence:
+                return window[0][1], window[-1][2]
+    return None
+
+
+def _rect_for_text_span(rect: list[Any], text: str, span: tuple[int, int]) -> list[float] | None:
+    if len(rect or []) != 4 or not text:
+        return None
+    x0, y0, x1, y1 = [float(value) for value in rect]
+    width = max(1.0, x1 - x0)
+    start, end = span
+    text_len = max(1, len(text))
+    span_x0 = x0 + (width * start / text_len)
+    span_x1 = x0 + (width * end / text_len)
+    if span_x1 - span_x0 < 14:
+        span_x1 = min(x1, span_x0 + 14)
+    return [round(span_x0, 2), round(y0, 2), round(span_x1, 2), round(y1, 2)]
+
+
 def _clip(score: float) -> float:
     return round(max(0.0, min(1.0, score)), 3)
 
@@ -174,39 +216,92 @@ def _compound_field_evidence(query: str, page: Any) -> dict[str, Any] | None:
 
 
 def _best_text_evidence(query: str, page: Any) -> dict[str, Any]:
-    best: dict[str, Any] = {
+    candidates = _text_evidence_candidates(query, page)
+    if candidates:
+        return candidates[0]
+    return {
         "score": 0.0,
         "token_overlap": 0.0,
         "similarity": 0.0,
         "text": "",
         "rect": None,
     }
+
+
+def _text_evidence_candidates(query: str, page: Any) -> list[dict[str, Any]]:
     query = (query or "").strip()
     if not query:
-        return best
+        return []
     compound = _compound_field_evidence(query, page)
     if compound is not None:
-        return compound
+        return [compound]
 
+    candidates: list[dict[str, Any]] = []
     for block in _text_blocks(page):
         text = str(block.get("text") or "")
+        rect = block.get("rect")
         overlap = _token_overlap(query, text)
         sim = _similarity(query[:140], text[:180])
         score = (0.65 * overlap) + (0.35 * sim)
-        if score > best["score"]:
-            best = {
+        span = _find_token_span(query, text)
+        refined_rect = _rect_for_text_span(rect, text, span) if span else None
+        if span:
+            score = max(score, 0.92)
+        candidates.append(
+            {
                 "score": round(score, 3),
                 "token_overlap": round(overlap, 3),
                 "similarity": round(sim, 3),
                 "text": text[:220],
-                "rect": block.get("rect"),
+                "rect": refined_rect or rect,
+                "block_rect": rect,
+                "evidence_source": "text_span" if refined_rect else "text_block",
+                "span": list(span) if span else None,
             }
+        )
 
     whole_page_overlap = _token_overlap(query, _page_text(page))
-    if whole_page_overlap > best["token_overlap"]:
-        best["token_overlap"] = round(whole_page_overlap, 3)
-        best["score"] = round(max(best["score"], whole_page_overlap * 0.9), 3)
-    return best
+    for candidate in candidates:
+        if whole_page_overlap > candidate["token_overlap"]:
+            candidate["token_overlap"] = round(whole_page_overlap, 3)
+            candidate["score"] = round(max(candidate["score"], whole_page_overlap * 0.9), 3)
+
+    candidates.sort(
+        key=lambda item: (
+            item.get("span") is not None,
+            item["score"],
+            -float((item.get("rect") or [0, 0, 0, 0])[1]),
+        ),
+        reverse=True,
+    )
+    return candidates
+
+
+def _ordered_text_evidence(
+    query: str,
+    page: Any,
+    evidence_usage: Counter[tuple[int, str]],
+) -> dict[str, Any]:
+    candidates = _text_evidence_candidates(query, page)
+    if not candidates:
+        return _best_text_evidence(query, page)
+
+    page_no = int(getattr(page, "page_index", 0)) + 1 if page is not None else 0
+    key = (page_no, _norm(query))
+    span_candidates = [candidate for candidate in candidates if candidate.get("span") is not None]
+    if span_candidates:
+        span_candidates.sort(
+            key=lambda item: (
+                float((item.get("rect") or [0, 0, 0, 0])[1]),
+                float((item.get("rect") or [0, 0, 0, 0])[0]),
+            )
+        )
+        index = min(evidence_usage[key], len(span_candidates) - 1)
+        evidence_usage[key] += 1
+        return span_candidates[index]
+
+    evidence_usage[key] += 1
+    return candidates[0]
 
 
 def _split_options(value: str) -> list[str]:
@@ -592,6 +687,7 @@ def build_review_manifest(
     pages = _page_map(doc_struct)
     rows_by_sequence = {int(r.sequence): r for r in rows if r.sequence is not None}
     seen_sequences: set[int] = set()
+    evidence_usage: Counter[tuple[int, str]] = Counter()
     manifest_rows: list[dict[str, Any]] = []
     reason_counts: Counter[str] = Counter()
     field_risk_counts: Counter[str] = Counter()
@@ -617,7 +713,7 @@ def build_review_manifest(
             rows_needing_review += 1
 
         row_risk_score = min([row.confidence or 1.0] + [f["confidence"] for f in field_reviews])
-        page_evidence = _best_text_evidence(row.question_text or "", page)
+        page_evidence = _ordered_text_evidence(row.question_text or "", page, evidence_usage)
         manifest_rows.append(
             {
                 "row_id": f"row_{index + 1:04d}",
