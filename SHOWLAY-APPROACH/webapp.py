@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """
 Local web app: upload PDF -> Excel.
 
@@ -10,28 +11,33 @@ Features:
   - Job state in memory (single-process); restart clears history
 """
 from __future__ import annotations
-import json, os, time, uuid, traceback
+
+import json
+import os
+import time
+import traceback
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+
 THIS = Path(__file__).resolve().parent
 load_dotenv(THIS / ".env")
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
-
-from showlay.extract import (
-    probe_and_rasterize,
-    extract_page_with_qwen,
-    vlm_dicts_to_rows,
-    _bedrock_runtime,
-)
-from showlay.postprocess import run_all
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from showlay.confidence import score_rows
-from showlay.writer import write_workbook, write_review_sidecar
-
+from showlay.extract import (
+    _bedrock_runtime,
+    extract_page_with_qwen,
+    probe_and_rasterize,
+    vlm_dicts_to_rows,
+)
+from showlay.field_review import build_review_manifest, write_review_manifest
+from showlay.postprocess import run_all
+from showlay.writer import write_review_sidecar, write_workbook
 
 ROOT = THIS.parent
 
@@ -105,6 +111,20 @@ def _run_pipeline(job_id: str, pdf_path: Path, original_name: str, template_path
         page_text = {p.page_index + 1: " ".join(t["text"] for t in p.text_blocks) for p in doc.pages}
         rows = score_rows(rows, page_text)
 
+        job["stage"] = "field_review"
+        job["message"] = "Building field-level review manifest..."
+        review_manifest = build_review_manifest(
+            rows,
+            doc_struct=doc,
+            raw_vlm=all_raw,
+            telemetry=telemetry,
+            run_id=job_id,
+            source_pdf=str(pdf_path),
+            template_path=str(template_path),
+        )
+        manifest_json = OUTPUT_DIR / f"{job_id}_review_manifest.json"
+        write_review_manifest(manifest_json, review_manifest)
+
         job["stage"] = "write"
         job["message"] = "Writing workbook..."
         out_xlsx = OUTPUT_DIR / f"{job_id}.xlsx"
@@ -127,11 +147,15 @@ def _run_pipeline(job_id: str, pdf_path: Path, original_name: str, template_path
         job["high_conf"] = sum(1 for r in rows if r.confidence >= 0.9)
         job["mid_conf"] = sum(1 for r in rows if 0.7 <= r.confidence < 0.9)
         job["low_conf"] = sum(1 for r in rows if r.confidence < 0.7)
+        job["field_high_risk"] = review_manifest["summary"]["field_risk_counts"].get("high", 0)
+        job["field_medium_risk"] = review_manifest["summary"]["field_risk_counts"].get("medium", 0)
+        job["rows_needing_review"] = review_manifest["summary"]["rows_needing_review"]
         job["elapsed_s"] = round(time.time() - t0, 1)
         # Public download names — use original filename minus .pdf
         base = Path(original_name).stem
         job["download_name"] = f"{base}.xlsx"
         job["review_name"] = f"{base}_review.xlsx"
+        job["manifest_name"] = f"{base}_review_manifest.json"
     except Exception as e:
         job["status"] = "error"
         job["stage"] = "error"
@@ -618,7 +642,8 @@ _INDEX_HTML = """<!doctype html>
       <div class="stage" data-key="extract">    <div class="stage-dot">2</div> <span>Qwen3-VL page-by-page extraction</span></div>
       <div class="stage" data-key="postprocess"><div class="stage-dot">3</div> <span>Post-process (24 deterministic stages)</span></div>
       <div class="stage" data-key="confidence"> <div class="stage-dot">4</div> <span>Confidence scoring</span></div>
-      <div class="stage" data-key="write">      <div class="stage-dot">5</div> <span>Write workbook & review sidecar</span></div>
+      <div class="stage" data-key="field_review"><div class="stage-dot">5</div> <span>Field-level review manifest</span></div>
+      <div class="stage" data-key="write">      <div class="stage-dot">6</div> <span>Write workbook & review sidecar</span></div>
     </div>
     <div class="bar"><div class="bar-fill" id="barFill"></div></div>
     <div class="msg" id="statusMsg">Initializing…</div>
@@ -649,6 +674,16 @@ _INDEX_HTML = """<!doctype html>
         <div class="dl-body">
           <div class="dl-title">Review queue</div>
           <div class="dl-meta">Rows sorted by confidence ascending — fastest path for human review</div>
+        </div>
+        <div class="dl-arrow">↓</div>
+      </a>
+      <a class="dl" id="dlManifest" href="">
+        <div class="dl-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8M8 17h5"/></svg>
+        </div>
+        <div class="dl-body">
+          <div class="dl-title">Field review manifest</div>
+          <div class="dl-meta" id="dlManifestSub">JSON with per-field risk, page images, text blocks, widgets, and raw VLM links</div>
         </div>
         <div class="dl-arrow">↓</div>
       </a>
@@ -721,7 +756,7 @@ submitBtn.addEventListener('click', async () => {
   poll(body.job_id);
 });
 
-const stageOrder = ['probe', 'extract', 'postprocess', 'confidence', 'write', 'done'];
+const stageOrder = ['probe', 'extract', 'postprocess', 'confidence', 'field_review', 'write', 'done'];
 function setStage(currentStage) {
   document.querySelectorAll('.stage').forEach(el => {
     const k = el.dataset.key;
@@ -769,6 +804,11 @@ function showResults(jobId, j) {
   document.getElementById('dlMainSub').textContent =
     j.row_count + ' rows · ' + j.elapsed_s + 's · ' + j.page_count + ' pages';
   document.getElementById('dlReview').href = '/review/' + jobId;
+  document.getElementById('dlManifest').href = '/manifest/' + jobId;
+  document.getElementById('dlManifestSub').textContent =
+    (j.rows_needing_review || 0) + ' rows need review · ' +
+    (j.field_high_risk || 0) + ' high-risk fields · ' +
+    (j.field_medium_risk || 0) + ' medium-risk fields';
 }
 function showError(msg) {
   errorCard.style.display = 'block';
@@ -786,7 +826,7 @@ def index() -> HTMLResponse:
 
 
 @app.post("/extract")
-async def extract(file: UploadFile = File(...)) -> dict:
+async def extract(file: UploadFile = File(...)) -> dict:  # noqa: B008
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Only PDF files are accepted.")
     job_id = uuid.uuid4().hex[:12]
@@ -836,9 +876,21 @@ def review(job_id: str):
     )
 
 
+@app.get("/manifest/{job_id}")
+def manifest(job_id: str):
+    job = JOBS.get(job_id)
+    if not job or job.get("status") != "done":
+        raise HTTPException(404, "Not ready")
+    return FileResponse(
+        OUTPUT_DIR / f"{job_id}_review_manifest.json",
+        filename=job.get("manifest_name", "review_manifest.json"),
+        media_type="application/json",
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
-    print(f"\n  SHOWLAY web app on http://localhost:8000")
+    print("\n  SHOWLAY web app on http://localhost:8000")
     print(f"  Model: {MODEL_ID}")
     print(f"  Template: {DEFAULT_TEMPLATE.name}\n")
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
