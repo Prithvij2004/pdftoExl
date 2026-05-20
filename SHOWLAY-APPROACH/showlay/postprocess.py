@@ -1425,6 +1425,8 @@ def split_compound_choice_rows(rows: list[Row]) -> list[Row]:
         child_type = "Checkbox Group" if _SELECT_ALL_RE.search(child_prompt) else "Radio Button"
         child = Row(
             page=r.page,
+            bbox=r.bbox,
+            source_ids=list(r.source_ids),
             section=r.section,
             question_type=child_type,
             question_text=child_prompt,
@@ -1570,6 +1572,8 @@ def split_attached_text_options(rows: list[Row]) -> list[Row]:
             if child_label:
                 child = Row(
                     page=r.page,
+                    bbox=r.bbox,
+                    source_ids=list(r.source_ids),
                     section=r.section,
                     question_type="Text Box",
                     question_text=child_label,
@@ -1752,6 +1756,8 @@ def absorb_orphan_checkbox_options(rows: list[Row]) -> list[Row]:
             if child_label and not used_existing_child:
                 children.append(Row(
                     page=row.page,
+                    bbox=row.bbox,
+                    source_ids=list(row.source_ids),
                     section=parent.section,
                     question_type="Text Box",
                     question_text=child_label,
@@ -1817,6 +1823,8 @@ def collapse_choice_groups(rows: list[Row]) -> list[Row]:
                         src = opts[0]
                         children.append(Row(
                             page=src.page,
+                            bbox=src.bbox,
+                            source_ids=list(src.source_ids),
                             section=r.section,
                             question_type="Text Box",
                             question_text=child_label,
@@ -1872,6 +1880,7 @@ def split_header_band(rows: list[Row]) -> list[Row]:
                     section=r.section,
                     page=r.page,
                     bbox=r.bbox,
+                    source_ids=list(r.source_ids),
                     confidence=r.confidence,
                     question_text=f"(header) {label}",
                     question_type=qtype,
@@ -2485,6 +2494,8 @@ def expand_packed_group_table_columns(rows: list[Row], truth_path: str | None = 
         for child in children:
             out.append(Row(
                 page=r.page,
+                bbox=r.bbox,
+                source_ids=list(r.source_ids),
                 section=r.section,
                 question_type=child.get("question_type") or "Text Box",
                 question_text=child.get("question_text") or "",

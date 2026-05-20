@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 THIS = Path(__file__).resolve().parent
 load_dotenv(THIS / ".env")
 
-from showlay.extract import probe_and_rasterize, extract_document, vlm_dicts_to_rows
+from showlay.extract import probe_and_rasterize, extract_document, resolve_row_source_bboxes, vlm_dicts_to_rows
 from showlay.postprocess import run_all
 from showlay.confidence import score_rows
 from showlay.writer import write_workbook, write_review_sidecar
@@ -51,11 +51,12 @@ for stem, fname in PDFS:
     (debug_dir / "raw_vlm.json").write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
     (debug_dir / "telemetry.json").write_text(json.dumps(telemetry, indent=2), encoding="utf-8")
 
-    rows = vlm_dicts_to_rows(raw)
+    rows = vlm_dicts_to_rows(raw, doc_struct=doc)
     print(f"      VLM produced {len(rows)} raw rows")
 
     print(f"[3/5] post-process ...")
     rows = run_all(rows, doc_struct=doc, truth_path=str(TEMPLATE))
+    rows = resolve_row_source_bboxes(rows, doc)
     print(f"      after post-process: {len(rows)} rows")
 
     print(f"[4/5] confidence ...")

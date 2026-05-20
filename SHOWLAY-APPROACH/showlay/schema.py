@@ -182,6 +182,7 @@ class Row(BaseModel):
     # bookkeeping for confidence pass (NOT written to gold-shape sheet)
     page: int | None = None
     bbox: list[float] | None = None    # [x0,y0,x1,y1] PDF coords
+    source_ids: list[str] = Field(default_factory=list)  # layout IDs such as T001/W004 used to resolve bbox
     confidence: float = 0.0
     review_reasons: list[str] = Field(default_factory=list)
 
@@ -388,6 +389,11 @@ Each question on the form becomes ONE JSON object with ONLY these keys:
                      only: format or input constraint text such as "default characters = 100",
                      "default characters = 600", "Format is mm/dd/yyyy", numeric-only
                      hints, or signature-area hints. Leave blank for selectable options.
+  source_ids         array of exact layout IDs from this page that visually support this row.
+                     Use T### IDs for printed labels/instructions and W### IDs for widgets,
+                     blanks, checkboxes, radio controls, or text inputs. Prefer the local
+                     occurrence on the row, not another repeated copy of the same words.
+                     Include both the label and the control when both are visible.
 
 Use AcroForm widgets as the primary signal when they are present:
   - Radio/checkbox widgets with one visible prompt and multiple options become one

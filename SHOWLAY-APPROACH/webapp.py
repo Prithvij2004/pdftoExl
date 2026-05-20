@@ -35,6 +35,7 @@ from showlay.extract import (
     _bedrock_runtime,
     extract_page_with_qwen,
     probe_and_rasterize,
+    resolve_row_source_bboxes,
     vlm_dicts_to_rows,
 )
 from showlay.field_review import build_review_manifest, write_review_manifest
@@ -106,8 +107,9 @@ def _run_pipeline(job_id: str, pdf_path: Path, original_name: str, template_path
 
         job["stage"] = "postprocess"
         job["message"] = "Post-processing rows..."
-        rows = vlm_dicts_to_rows(all_raw)
+        rows = vlm_dicts_to_rows(all_raw, doc_struct=doc)
         rows = run_all(rows, doc_struct=doc, truth_path=str(template_path))
+        rows = resolve_row_source_bboxes(rows, doc)
 
         job["stage"] = "confidence"
         job["message"] = "Scoring confidence..."
@@ -1678,7 +1680,7 @@ function rowPage(row) {
 }
 
 function bestRect(row) {
-  const rowBox = row?.bbox;
+  const rowBox = row?.bbox || row?.row?.bbox;
   if (Array.isArray(rowBox) && rowBox.length === 4) return rowBox;
   const sourceRect = row?.source?.nearest_text_block?.rect;
   if (Array.isArray(sourceRect) && sourceRect.length === 4) return sourceRect;
@@ -1895,6 +1897,7 @@ function createBlankRow(pageNo) {
     sequence: '',
     page: pageNo || currentPage,
     bbox: null,
+    source_ids: [],
     row_confidence: 1,
     risk_level: 'medium',
     fields: {},
@@ -1902,6 +1905,7 @@ function createBlankRow(pageNo) {
       sequence: '',
       page: pageNo || currentPage,
       bbox: null,
+      source_ids: [],
       confidence: 1,
       review_reasons: ['manual_row_added'],
       section: '',
@@ -2153,6 +2157,7 @@ def _normalize_saved_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         row["sequence"] = row["row"].get("sequence", row.get("sequence", ""))
         row["page"] = row["row"].get("page", row.get("page", ""))
         row["bbox"] = row["row"].get("bbox", row.get("bbox"))
+        row["source_ids"] = row["row"].get("source_ids", row.get("source_ids", []))
 
         risks = [
             str(field.get("risk_level", "low")).lower()
@@ -2203,6 +2208,7 @@ def _rows_from_manifest(manifest: dict[str, Any]) -> list[Row]:
         snapshot.setdefault("sequence", item.get("sequence"))
         snapshot.setdefault("page", item.get("page"))
         snapshot.setdefault("bbox", item.get("bbox"))
+        snapshot.setdefault("source_ids", item.get("source_ids", []))
         snapshot.setdefault("confidence", item.get("row_confidence", 1.0))
         snapshot.setdefault("review_reasons", item.get("review_reasons", []))
         snapshot["sequence"] = _nullable_int(snapshot.get("sequence"))

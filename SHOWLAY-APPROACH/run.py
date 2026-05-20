@@ -29,7 +29,7 @@ load_dotenv(THIS_DIR / ".env")
 
 from showlay.confidence import score_rows
 from showlay.eval import evaluate
-from showlay.extract import extract_document, probe_and_rasterize, vlm_dicts_to_rows
+from showlay.extract import extract_document, probe_and_rasterize, resolve_row_source_bboxes, vlm_dicts_to_rows
 from showlay.field_review import build_review_manifest, write_review_manifest
 from showlay.postprocess import run_all as postprocess_all
 from showlay.writer import write_review_sidecar, write_workbook
@@ -71,12 +71,13 @@ def main():
     (debug_dir / "raw_vlm.json").write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
     (debug_dir / "telemetry.json").write_text(json.dumps(telemetry, indent=2), encoding="utf-8")
 
-    rows = vlm_dicts_to_rows(raw)
+    rows = vlm_dicts_to_rows(raw, doc_struct=doc)
     print(f"      VLM produced {len(rows)} row dicts")
 
     # 4. post-process
     print("\n[3/7] post-process (sequence, sections, branching) ...")
     rows = postprocess_all(rows, doc_struct=doc, truth_path=truth_path)
+    rows = resolve_row_source_bboxes(rows, doc)
     print(f"      after post-process: {len(rows)} rows")
 
     # 5. confidence

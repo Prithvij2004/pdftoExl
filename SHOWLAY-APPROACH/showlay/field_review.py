@@ -637,6 +637,7 @@ def _raw_match(row: Row, raw_vlm: list[dict] | None) -> dict[str, Any]:
         "raw_vlm_index": best_idx,
         "raw_vlm_question_type": raw.get("question_type", ""),
         "raw_vlm_question_text": raw.get("question_text", ""),
+        "raw_vlm_source_ids": raw.get("source_ids", []),
     }
 
 
@@ -661,6 +662,7 @@ def _row_snapshot(row: Row) -> dict[str, Any]:
         "sequence": row.sequence,
         "page": row.page,
         "bbox": row.bbox,
+        "source_ids": list(row.source_ids),
         "confidence": row.confidence,
         "review_reasons": list(row.review_reasons),
         "section": row.section,
@@ -721,12 +723,14 @@ def build_review_manifest(
                 "sequence": row.sequence,
                 "page": row.page,
                 "bbox": row.bbox,
+                "source_ids": list(row.source_ids),
                 "row_confidence": row.confidence,
                 "risk_level": _risk(row_risk_score),
                 "fields": {field["field"]: field for field in field_reviews},
                 "row": _row_snapshot(row),
                 "source": {
                     "page_image": getattr(page, "image_path", "") if page is not None else "",
+                    "source_ids": list(row.source_ids),
                     "nearest_text_block": page_evidence,
                     **_raw_match(row, raw_vlm),
                 },

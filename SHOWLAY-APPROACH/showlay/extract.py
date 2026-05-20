@@ -60,10 +60,19 @@ def probe_and_rasterize(pdf_path: str, image_dir: str, dpi: int = 200) -> DocStr
                 "value": w.field_value or "",
                 "rect": [round(r.x0, 2), round(r.y0, 2), round(r.x1, 2), round(r.y1, 2)],
             })
+        widgets.sort(
+            key=lambda item: (
+                float((item.get("rect") or [0, 0, 0, 0])[1]),
+                float((item.get("rect") or [0, 0, 0, 0])[0]),
+            )
+        )
+        for widx, widget in enumerate(widgets, start=1):
+            widget["id"] = f"W{widx:03d}"
         if widgets:
             has_widgets = True
 
         text_blocks: list[dict] = []
+        text_id = 1
         for blk in page.get_text("dict")["blocks"]:
             if blk.get("type") != 0:
                 continue
@@ -74,10 +83,12 @@ def probe_and_rasterize(pdf_path: str, image_dir: str, dpi: int = 200) -> DocStr
                 bb = line["bbox"]
                 avg_size = sum(s["size"] for s in line["spans"]) / max(1, len(line["spans"]))
                 text_blocks.append({
+                    "id": f"T{text_id:03d}",
                     "text": line_text,
                     "rect": [round(bb[0], 2), round(bb[1], 2), round(bb[2], 2), round(bb[3], 2)],
                     "size": round(avg_size, 1),
                 })
+                text_id += 1
 
         pages.append(PageStructure(
             page_index=i,
@@ -117,7 +128,10 @@ def _build_prompt(page_struct: PageStructure, doc_struct: DocStructure) -> str:
         parts.append("")
         parts.append("== AcroForm widgets present on this page (authoritative, use these) ==")
         for w in page_struct.widgets[:60]:
-            parts.append(f"  - type={w['type']:<10} name={w['name']!r:<60}  label={w['label']!r}  rect={w['rect']}")
+            parts.append(
+                f"  - {w.get('id', '')} type={w['type']:<10} name={w['name']!r:<60}  "
+                f"label={w['label']!r}  rect={w['rect']}"
+            )
     elif doc_struct.has_acroform:
         parts.append("")
         parts.append("(This PDF has AcroForm widgets but none on this page.)")
@@ -131,7 +145,10 @@ def _build_prompt(page_struct: PageStructure, doc_struct: DocStructure) -> str:
         parts.append("")
         parts.append("== Text layout (PyMuPDF lines, top-to-bottom, may help disambiguate sections/labels) ==")
         for tb in page_struct.text_blocks[:80]:
-            parts.append(f"  [{tb['rect'][0]:>5.0f},{tb['rect'][1]:>5.0f}] sz{tb['size']:>4} {tb['text'][:120]!r}")
+            parts.append(
+                f"  - {tb.get('id', '')} rect={tb['rect']} sz{tb['size']:>4} "
+                f"{tb['text'][:120]!r}"
+            )
 
     parts.append("")
     parts.append("== Output schema ==")
@@ -221,7 +238,94 @@ _VLM_KEY_TO_ROW_FIELD = {
 }
 
 
-def vlm_dicts_to_rows(raw: list[dict]) -> list[Row]:
+def _normalize_source_id(value: Any) -> str | None:
+    match = re.search(r"\b([TW])\s*0*(\d{1,4})\b", str(value or "").strip(), re.IGNORECASE)
+    if not match:
+        return None
+    return f"{match.group(1).upper()}{int(match.group(2)):03d}"
+
+
+def _parse_source_ids(value: Any) -> list[str]:
+    if value in ("", None):
+        return []
+    raw_values: list[Any]
+    if isinstance(value, list):
+        raw_values = value
+    elif isinstance(value, tuple):
+        raw_values = list(value)
+    else:
+        found = re.findall(r"\b[TW]\s*0*\d{1,4}\b", str(value), flags=re.IGNORECASE)
+        raw_values = found if found else re.split(r"[,;\s]+", str(value))
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        if isinstance(raw, (list, tuple)):
+            candidates = _parse_source_ids(raw)
+        else:
+            normalized = _normalize_source_id(raw)
+            candidates = [normalized] if normalized else []
+        for source_id in candidates:
+            if source_id and source_id not in seen:
+                seen.add(source_id)
+                out.append(source_id)
+    return out
+
+
+def _parse_bbox(value: Any) -> list[float] | None:
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    try:
+        return [round(float(v), 2) for v in value]
+    except (TypeError, ValueError):
+        return None
+
+
+def _layout_rect_index(doc_struct: DocStructure | None) -> dict[tuple[int, str], list[float]]:
+    if doc_struct is None:
+        return {}
+    index: dict[tuple[int, str], list[float]] = {}
+    for page_struct in getattr(doc_struct, "pages", []) or []:
+        page_no = int(getattr(page_struct, "page_index", 0)) + 1
+        for item in list(getattr(page_struct, "text_blocks", []) or []) + list(getattr(page_struct, "widgets", []) or []):
+            source_id = _normalize_source_id(item.get("id"))
+            rect = _parse_bbox(item.get("rect"))
+            if source_id and rect:
+                index[(page_no, source_id)] = rect
+    return index
+
+
+def _union_rect(rects: list[list[float]]) -> list[float] | None:
+    if not rects:
+        return None
+    return [
+        round(min(rect[0] for rect in rects), 2),
+        round(min(rect[1] for rect in rects), 2),
+        round(max(rect[2] for rect in rects), 2),
+        round(max(rect[3] for rect in rects), 2),
+    ]
+
+
+def resolve_row_source_bboxes(rows: list[Row], doc_struct: DocStructure | None) -> list[Row]:
+    """Resolve model-selected layout IDs into deterministic PDF-coordinate row boxes."""
+    rect_index = _layout_rect_index(doc_struct)
+    if not rect_index:
+        return rows
+    for row in rows:
+        page_no = int(row.page or 0)
+        if not page_no or not row.source_ids:
+            continue
+        rects = [
+            rect
+            for source_id in row.source_ids
+            if (rect := rect_index.get((page_no, source_id)))
+        ]
+        if rects:
+            row.bbox = _union_rect(rects)
+    return rows
+
+
+def vlm_dicts_to_rows(raw: list[dict], doc_struct: DocStructure | None = None) -> list[Row]:
     rows: list[Row] = []
     for d in raw:
         r = Row()
@@ -241,5 +345,9 @@ def vlm_dicts_to_rows(raw: list[dict]) -> list[Row]:
                 r.page = int(page)
             except Exception:
                 pass
+        r.source_ids = _parse_source_ids(d.get("source_ids") or d.get("source_id"))
+        parsed_bbox = _parse_bbox(d.get("bbox"))
+        if parsed_bbox:
+            r.bbox = parsed_bbox
         rows.append(r)
-    return rows
+    return resolve_row_source_bboxes(rows, doc_struct)
