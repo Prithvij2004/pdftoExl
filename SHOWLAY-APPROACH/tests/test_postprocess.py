@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-SHOWLAY_DIR = Path(__file__).resolve().parents[2] / "SHOWLAY-APPROACH"
+SHOWLAY_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHOWLAY_DIR))
 
 from showlay.postprocess import dedupe_table_repetitions  # noqa: E402

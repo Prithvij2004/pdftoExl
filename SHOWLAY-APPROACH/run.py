@@ -31,6 +31,7 @@ from showlay.confidence import score_rows
 from showlay.eval import evaluate
 from showlay.extract import extract_document, probe_and_rasterize, vlm_dicts_to_rows
 from showlay.field_review import build_review_manifest, write_review_manifest
+from showlay.paths import RUNTIME_DIR
 from showlay.postprocess import run_all as postprocess_all
 from showlay.writer import write_review_sidecar, write_workbook
 
@@ -48,9 +49,9 @@ def main():
     truth_path = str(Path(args.truth).resolve())
     stem = args.name or Path(pdf_path).stem.replace(" ", "_")[:60]
 
-    out_dir = THIS_DIR / "runtime" / "output" / stem
-    img_dir = THIS_DIR / "runtime" / "page_images"
-    debug_dir = THIS_DIR / "runtime" / "extracted" / stem
+    out_dir = RUNTIME_DIR / "output" / stem
+    img_dir = RUNTIME_DIR / "page_images"
+    debug_dir = RUNTIME_DIR / "extracted" / stem
     eval_dir = THIS_DIR / "eval_reports" / stem
     for d in (out_dir, debug_dir, eval_dir):
         d.mkdir(parents=True, exist_ok=True)

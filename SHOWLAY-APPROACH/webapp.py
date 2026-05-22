@@ -38,31 +38,15 @@ from showlay.extract import (
     vlm_dicts_to_rows,
 )
 from showlay.field_review import build_review_manifest, write_review_manifest
+from showlay.paths import RUNTIME_DIR, default_template_path
 from showlay.postprocess import run_all
 from showlay.schema import Row
 from showlay.writer import write_review_sidecar, write_workbook
 
-ROOT = THIS.parent
-
-
-def _resolve_default_template() -> Path:
-    candidates = [
-        ROOT / "docs" / "support_docs" / "CHOICES Safety Determination Request Form Final_11_20.xlsx",
-        ROOT / "SOURCE AND TARGET FILES" / "CHOICES Safety Determination Request Form Final_11_20 1.xlsx",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError(
-        "Could not find the default template workbook. Checked: "
-        + ", ".join(str(path) for path in candidates)
-    )
-
-
-DEFAULT_TEMPLATE = _resolve_default_template()
-UPLOAD_DIR = THIS / "runtime" / "uploads_web"
-OUTPUT_DIR = THIS / "runtime" / "output_web"
-IMG_DIR = THIS / "runtime" / "page_images_web"
+DEFAULT_TEMPLATE = default_template_path()
+UPLOAD_DIR = RUNTIME_DIR / "uploads_web"
+OUTPUT_DIR = RUNTIME_DIR / "output_web"
+IMG_DIR = RUNTIME_DIR / "page_images_web"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 IMG_DIR.mkdir(parents=True, exist_ok=True)

@@ -1,4 +1,4 @@
-# SHOWLAY-APPROACH — PDF → 28-column Assessment Excel
+# SHOWLAY-APPROACH - PDF to 28-column Assessment Excel
 
 Built 2026-05-07. Targets ≥90% row accuracy with confidence flagging for human review.
 
@@ -42,27 +42,62 @@ Verifier pass with Claude Haiku 4.5 reserved for v2 — v1 ships baseline first.
 
 ```
 SHOWLAY-APPROACH/
-├── .env                      # AWS creds, model IDs
-├── README.md                 # this file
-├── run.py                    # end-to-end CLI: python run.py <pdf> <truth_xlsx> [--out <name>]
-├── showlay/
-│   ├── schema.py             # 28-column Pydantic models + enums + DSL
-│   ├── extract.py            # probe + rasterize + widgets + Qwen3-VL extraction
-│   ├── postprocess.py        # section/sequence/branching post-passes
-│   ├── confidence.py         # per-row confidence aggregation
-│   ├── writer.py             # template-based 28-column Excel writer
-│   └── eval.py               # truth comparison + accuracy report
-├── runtime/
-│   ├── page_images/          # 200 DPI PNGs per page
-│   ├── extracted/            # raw VLM JSON per page
-│   └── output/               # final XLSX + review sidecar
-└── eval_reports/             # markdown + JSON eval reports
+├── .env.example              # copy to .env for AWS credentials
+├── pyproject.toml            # standalone install + test config
+├── requirements.txt          # runtime dependencies
+├── run.py                    # CLI: python run.py <pdf> <template_xlsx>
+├── webapp.py                 # FastAPI app: python webapp.py
+├── support_docs/             # bundled default templates and sample PDFs
+├── showlay/                  # extraction, post-processing, review, writer code
+├── tests/                    # SHOWLAY unit tests
+└── runtime/                  # generated files; ignored by git
 ```
 
-## Run
+The folder is now self-contained. It does not need files from the parent repo.
+
+## Setup
 
 ```bash
 cd "SHOWLAY-APPROACH"
-python run.py "..\SOURCE AND TARGET FILES\sph_rev25-3_H1700-3_final_approved 1.pdf" \
-              "..\SOURCE AND TARGET FILES\TX LTSS - 1700-3, Individual Service Plan - Signature Page 1.xlsx"
+python3.12 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+Fill `.env` with AWS Bedrock credentials.
+
+## Run Web App
+
+```bash
+cd "SHOWLAY-APPROACH"
+python webapp.py
+```
+
+Open `http://localhost:8000`.
+
+The web app uses this bundled template by default:
+
+```text
+support_docs/CHOICES Safety Determination Request Form Final_11_20.xlsx
+```
+
+You can override it with `SHOWLAY_TEMPLATE_PATH=/path/to/template.xlsx`.
+
+## Run CLI
+
+```bash
+cd "SHOWLAY-APPROACH"
+python run.py "support_docs/CHOICES Safety Determination Form.pdf" \
+              "support_docs/CHOICES Safety Determination Request Form Final_11_20.xlsx"
+```
+
+Outputs go to `runtime/output/<name>/`.
+
+## Test
+
+```bash
+cd "SHOWLAY-APPROACH"
+pip install -r requirements-dev.txt
+pytest
 ```

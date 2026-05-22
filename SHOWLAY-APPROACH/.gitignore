@@ -10,6 +10,8 @@ __pycache__/
 .venv/
 venv/
 .python-version
+.pytest_cache/
+*.egg-info/
 
 # Generated runtime artifacts (large; reproducible by re-running)
 runtime/page_images/

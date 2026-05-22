@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-SHOWLAY_DIR = Path(__file__).resolve().parents[2] / "SHOWLAY-APPROACH"
+SHOWLAY_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHOWLAY_DIR))
 
 from showlay.field_review import (  # noqa: E402

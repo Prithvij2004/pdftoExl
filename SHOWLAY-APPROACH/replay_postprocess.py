@@ -17,18 +17,21 @@ THIS_DIR = Path(__file__).resolve().parent
 
 from showlay.extract import vlm_dicts_to_rows
 from showlay.postprocess import run_all as postprocess_all
+from showlay.paths import (
+    CHOICES_TEMPLATE_FILENAME,
+    TXLTSS_TEMPLATE_FILENAME,
+    support_doc_path,
+)
 from showlay.writer import write_workbook
 from showlay.eval import evaluate
 
 
 CASES = {
     "TXLTSS": {
-        "truth": (THIS_DIR.parent / "SOURCE AND TARGET FILES" /
-                  "TX LTSS - 1700-3, Individual Service Plan - Signature Page 1.xlsx"),
+        "truth": support_doc_path(TXLTSS_TEMPLATE_FILENAME, must_exist=False),
     },
     "CHOICES": {
-        "truth": (THIS_DIR.parent / "SOURCE AND TARGET FILES" /
-                  "CHOICES Safety Determination Request Form Final_11_20 1.xlsx"),
+        "truth": support_doc_path(CHOICES_TEMPLATE_FILENAME, must_exist=False),
     },
 }
 

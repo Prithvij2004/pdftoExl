@@ -11,8 +11,9 @@ import asyncio, json, os, sys, time
 from pathlib import Path
 
 THIS = Path(__file__).resolve().parent
-ROOT = THIS.parent
-AGENTIC = ROOT / "pdftoExl_branches" / "agentic-pydantic-ai"
+AGENTIC = Path(
+    os.environ.get("AGENTIC_BRANCH_DIR", THIS / "external" / "agentic-pydantic-ai")
+).expanduser()
 
 # Credentials come from .env / process environment — do NOT hardcode.
 # Force Nova-Pro for the agentic branch (it uses Bedrock document block, which
@@ -22,36 +23,65 @@ load_dotenv(THIS / ".env")
 os.environ.setdefault("AWS_REGION", "us-west-2")
 os.environ["BEDROCK_MODEL_ID"] = "us.amazon.nova-pro-v1:0"
 
-# Make agentic branch importable
-sys.path.insert(0, str(AGENTIC))
-
-# Now import. Note: app/config.py calls load_dotenv(".env") which would override what we set
-# above. Our env-vars take precedence because load_dotenv defaults to override=False.
-from app.services.agentic_extractor import extract_rows_from_pdf_agentic
-from app.services.normalize import assign_sequence, normalize_rows, resolve_branching_logic
-from app.services.semantic_pass_agent import llm_semantic_pass
-from app.services.excel_writer import write_rows_to_xlsx
-
-# Then add SHOWLAY for eval
-sys.path.insert(0, str(THIS))
 from showlay.eval import evaluate
+from showlay.paths import (
+    CHOICES_PDF_FILENAME,
+    CHOICES_TEMPLATE_FILENAME,
+    TXLTSS_PDF_FILENAME,
+    TXLTSS_TEMPLATE_FILENAME,
+    support_doc_path,
+)
 
 
 PAIRS = [
     {
         "name": "TXLTSS",
-        "pdf": ROOT / "SOURCE AND TARGET FILES" / "sph_rev25-3_H1700-3_final_approved 1.pdf",
-        "truth": ROOT / "SOURCE AND TARGET FILES" / "TX LTSS - 1700-3, Individual Service Plan - Signature Page 1.xlsx",
+        "pdf": support_doc_path(TXLTSS_PDF_FILENAME, must_exist=False),
+        "truth": support_doc_path(TXLTSS_TEMPLATE_FILENAME, must_exist=False),
     },
     {
         "name": "CHOICES",
-        "pdf": ROOT / "SOURCE AND TARGET FILES" / "CHOICES Safety Determination Form 2.pdf",
-        "truth": ROOT / "SOURCE AND TARGET FILES" / "CHOICES Safety Determination Request Form Final_11_20 1.xlsx",
+        "pdf": support_doc_path(CHOICES_PDF_FILENAME, must_exist=False),
+        "truth": support_doc_path(CHOICES_TEMPLATE_FILENAME, must_exist=False),
     },
 ]
 
 
-async def run_agentic(pdf_path: Path, out_xlsx: Path):
+def _load_agentic_services():
+    if not AGENTIC.exists():
+        raise SystemExit(
+            "Missing agentic branch checkout. Set AGENTIC_BRANCH_DIR to the "
+            "agentic-pydantic-ai checkout if you want to run this comparison."
+        )
+
+    sys.path.insert(0, str(AGENTIC))
+
+    # app/config.py calls load_dotenv(".env"). Env vars above stay in place because
+    # load_dotenv defaults to override=False.
+    from app.services.agentic_extractor import extract_rows_from_pdf_agentic
+    from app.services.excel_writer import write_rows_to_xlsx
+    from app.services.normalize import assign_sequence, normalize_rows, resolve_branching_logic
+    from app.services.semantic_pass_agent import llm_semantic_pass
+
+    return (
+        extract_rows_from_pdf_agentic,
+        write_rows_to_xlsx,
+        assign_sequence,
+        normalize_rows,
+        resolve_branching_logic,
+        llm_semantic_pass,
+    )
+
+
+async def run_agentic(pdf_path: Path, out_xlsx: Path, services):
+    (
+        extract_rows_from_pdf_agentic,
+        write_rows_to_xlsx,
+        assign_sequence,
+        normalize_rows,
+        resolve_branching_logic,
+        llm_semantic_pass,
+    ) = services
     t0 = time.time()
     rows = await extract_rows_from_pdf_agentic(pdf_path)
     rows = normalize_rows(rows)
@@ -64,6 +94,7 @@ async def run_agentic(pdf_path: Path, out_xlsx: Path):
 
 
 def main():
+    services = _load_agentic_services()
     out_dir = THIS / "runtime" / "output_agentic"
     out_dir.mkdir(parents=True, exist_ok=True)
     eval_dir = THIS / "eval_reports"
@@ -77,7 +108,7 @@ def main():
         print(f"\n>>> AGENTIC pipeline: {name}  ({pdf.name})")
         out_xlsx = out_dir / f"{name}.xlsx"
         try:
-            elapsed, n_rows = asyncio.run(run_agentic(pdf, out_xlsx))
+            elapsed, n_rows = asyncio.run(run_agentic(pdf, out_xlsx, services))
             print(f"    {n_rows} rows in {elapsed:.1f}s")
             ev_dir = eval_dir / f"{name}_agentic"
             summary = evaluate(str(out_xlsx), str(truth), str(ev_dir))

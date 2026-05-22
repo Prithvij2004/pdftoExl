@@ -14,12 +14,12 @@ load_dotenv(THIS / ".env")
 from showlay.extract import probe_and_rasterize, extract_document, vlm_dicts_to_rows
 from showlay.postprocess import run_all
 from showlay.confidence import score_rows
+from showlay.paths import RUNTIME_DIR, app_path, default_template_path
 from showlay.writer import write_workbook, write_review_sidecar
 
-ROOT = THIS.parent
-TEMPLATE = ROOT / "SOURCE AND TARGET FILES" / "CHOICES Safety Determination Request Form Final_11_20 1.xlsx"
-SOURCE_DIR = ROOT / "new pdf files"
-OUT_DIR = THIS / "runtime" / "output"
+TEMPLATE = default_template_path()
+SOURCE_DIR = Path(os.environ.get("SHOWLAY_NEW_PDF_DIR", app_path("new_pdf_files")))
+OUT_DIR = RUNTIME_DIR / "output"
 
 PDFS = [
     ("HCBS_Applicant_Tool", "HCBSApplicantTool.pdf 7.28.17 Fillable.pdf"),
@@ -27,7 +27,7 @@ PDFS = [
     ("Multiple_Complex_Health_Conditions", "Multiple Complex Health Conditions  Form -FINAL rev 12.1.16_Fillable (1).pdf"),
 ]
 
-img_dir = THIS / "runtime" / "page_images"
+img_dir = RUNTIME_DIR / "page_images"
 
 for stem, fname in PDFS:
     pdf = SOURCE_DIR / fname
@@ -36,7 +36,7 @@ for stem, fname in PDFS:
     print('='*70)
 
     out_dir = OUT_DIR / stem
-    debug_dir = THIS / "runtime" / "extracted" / stem
+    debug_dir = RUNTIME_DIR / "extracted" / stem
     out_dir.mkdir(parents=True, exist_ok=True)
     debug_dir.mkdir(parents=True, exist_ok=True)
 
