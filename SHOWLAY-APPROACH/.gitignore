@@ -18,6 +18,7 @@ runtime/page_images/
 runtime/uploads/
 runtime/uploads_web/
 runtime/extracted/
+runtime/output/
 runtime/output_web/
 runtime/output_agentic/
 runtime/CHOICES_diff.txt
