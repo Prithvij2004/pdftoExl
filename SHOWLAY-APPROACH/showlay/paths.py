@@ -19,16 +19,14 @@ def _path_from_env(name: str, default: Path) -> Path:
 RUNTIME_DIR = _path_from_env("SHOWLAY_RUNTIME_DIR", APP_DIR / "runtime")
 SUPPORT_DOCS_DIR = _path_from_env("SHOWLAY_SUPPORT_DOCS_DIR", APP_DIR / "support_docs")
 
-DEFAULT_TEMPLATE_FILENAME = "CHOICES Safety Determination Request Form Final_11_20.xlsx"
+DEFAULT_TEMPLATE_FILENAME = "choices-safety-determination-hip-workbook.xlsx"
 CHOICES_TEMPLATE_FILENAME = DEFAULT_TEMPLATE_FILENAME
 LEGACY_CHOICES_TEMPLATE_FILENAME = (
     "CHOICES Safety Determination Request Form Final_11_20 1.xlsx"
 )
-TXLTSS_TEMPLATE_FILENAME = (
-    "TX LTSS - 1700-3, Individual Service Plan - Signature Page.xlsx"
-)
-CHOICES_PDF_FILENAME = "CHOICES Safety Determination Form.pdf"
-TXLTSS_PDF_FILENAME = "sph_rev25-3_H1700-3_final_approved.pdf"
+TXLTSS_TEMPLATE_FILENAME = "tx-ltss-h1700-3-signature-page-hip-workbook.xlsx"
+CHOICES_PDF_FILENAME = "choices-safety-determination-source.pdf"
+TXLTSS_PDF_FILENAME = "tx-ltss-h1700-3-signature-page-source.pdf"
 
 
 def app_path(*parts: str) -> Path:
