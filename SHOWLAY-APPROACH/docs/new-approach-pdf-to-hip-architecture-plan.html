@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF-to-HIP Assessment Extraction | Architecture & Design Plan</title>
+  <style>
+    :root {
+      --teal: #007a7a;
+      --teal-dark: #005f61;
+      --teal-soft: #e6f3f3;
+      --navy: #071a24;
+      --ink: #182832;
+      --muted: #667782;
+      --bg: #f6f9fb;
+      --card: #ffffff;
+      --line: #d8e4e8;
+      --amber: #ffb547;
+      --green: #00a676;
+      --red: #d94f45;
+      --code-bg: #0c1f2b;
+      --shadow: 0 14px 36px rgba(7, 26, 36, 0.10);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.58;
+    }
+
+    .cover {
+      min-height: 96vh;
+      display: grid;
+      grid-template-columns: 0.92fr 1.08fr;
+      background:
+        radial-gradient(circle at 72% 18%, rgba(0, 122, 122, 0.20), transparent 28%),
+        linear-gradient(135deg, #ffffff 0%, #ffffff 28%, #08212c 28%, #071a24 100%);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .cover::after {
+      content: "";
+      position: absolute;
+      right: -120px;
+      top: -120px;
+      width: 520px;
+      height: 520px;
+      border-radius: 50%;
+      background: rgba(0, 122, 122, 0.25);
+      filter: blur(18px);
+    }
+
+    .cover-left {
+      display: flex;
+      align-items: center;
+      padding: 72px 0 72px 5.5vw;
+      z-index: 2;
+    }
+
+    .title-panel {
+      background: var(--teal);
+      color: white;
+      padding: 46px 48px;
+      width: min(720px, 92%);
+      box-shadow: var(--shadow);
+    }
+
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.17em;
+      font-weight: 700;
+      font-size: 13px;
+      opacity: 0.88;
+      margin-bottom: 22px;
+    }
+
+    h1 {
+      font-size: clamp(42px, 5.5vw, 76px);
+      line-height: 0.98;
+      margin: 0 0 24px;
+      font-weight: 400;
+      letter-spacing: -0.045em;
+    }
+
+    .cover-subtitle {
+      font-size: 21px;
+      max-width: 650px;
+      margin: 0;
+      opacity: 0.96;
+    }
+
+    .cover-right {
+      padding: 72px 5.5vw 72px 28px;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      z-index: 2;
+    }
+
+    .status-card {
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.07);
+      backdrop-filter: blur(8px);
+      border-radius: 22px;
+      padding: 30px;
+      max-width: 650px;
+      box-shadow: 0 18px 50px rgba(0,0,0,0.22);
+    }
+
+    .status-card h2 {
+      margin-top: 0;
+      color: white;
+      font-size: 28px;
+      line-height: 1.2;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 22px;
+    }
+
+    .pill {
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 18px;
+      padding: 14px 16px;
+      background: rgba(255,255,255,0.06);
+      font-size: 14px;
+    }
+
+    .pill strong {
+      display: block;
+      color: #c7ffff;
+      font-size: 15px;
+      margin-bottom: 3px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 0;
+    }
+
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      background: var(--navy);
+      color: white;
+      padding: 28px 22px;
+      border-right: 1px solid rgba(255,255,255,0.08);
+    }
+
+    aside .brand {
+      color: #c7ffff;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      margin-bottom: 22px;
+      font-size: 17px;
+    }
+
+    nav a {
+      display: block;
+      color: rgba(255,255,255,0.78);
+      text-decoration: none;
+      padding: 9px 10px;
+      border-radius: 10px;
+      margin: 3px 0;
+      font-size: 14px;
+    }
+
+    nav a:hover {
+      background: rgba(0, 122, 122, 0.35);
+      color: white;
+    }
+
+    main {
+      padding: 42px 5.5vw 80px;
+      max-width: 1380px;
+      width: 100%;
+    }
+
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 34px;
+      margin: 0 0 28px;
+      box-shadow: 0 10px 30px rgba(7, 26, 36, 0.055);
+    }
+
+    h2 {
+      color: var(--navy);
+      font-size: 34px;
+      line-height: 1.18;
+      margin: 0 0 16px;
+      letter-spacing: -0.03em;
+    }
+
+    h3 {
+      color: var(--teal-dark);
+      font-size: 22px;
+      margin: 28px 0 10px;
+    }
+
+    h4 {
+      font-size: 18px;
+      margin: 22px 0 8px;
+      color: var(--navy);
+    }
+
+    p { margin: 10px 0 14px; }
+    .lead { font-size: 19px; color: #34454e; }
+
+    .callout {
+      border-left: 6px solid var(--teal);
+      background: var(--teal-soft);
+      padding: 18px 20px;
+      border-radius: 16px;
+      margin: 22px 0;
+    }
+
+    .warning {
+      border-left-color: var(--amber);
+      background: #fff6e8;
+    }
+
+    .success {
+      border-left-color: var(--green);
+      background: #e9f8f3;
+    }
+
+    .danger {
+      border-left-color: var(--red);
+      background: #fff0ef;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 18px 0 26px;
+      overflow: hidden;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: white;
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+    }
+
+    th {
+      background: var(--teal);
+      color: white;
+      font-weight: 650;
+    }
+
+    tr:last-child td { border-bottom: none; }
+    tr:nth-child(even) td { background: #fbfdfe; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 5px 10px;
+      background: var(--teal-soft);
+      color: var(--teal-dark);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-right: 8px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 18px;
+    }
+
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    .mini-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 20px;
+      background: #fff;
+      box-shadow: 0 8px 18px rgba(7,26,36,0.045);
+    }
+
+    .mini-card h4 {
+      margin-top: 0;
+      color: var(--teal-dark);
+    }
+
+    pre {
+      background: var(--code-bg);
+      color: #d5faff;
+      padding: 18px 20px;
+      border-radius: 18px;
+      overflow: auto;
+      font-size: 13px;
+      line-height: 1.55;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    code {
+      font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 0.94em;
+      background: #eef6f7;
+      color: #005f61;
+      padding: 2px 5px;
+      border-radius: 6px;
+    }
+
+    pre code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(120px, 1fr));
+      gap: 10px;
+      margin: 24px 0;
+      align-items: stretch;
+    }
+
+    .flow .step {
+      background: linear-gradient(180deg, #ffffff, #f1f8f9);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px;
+      position: relative;
+      min-height: 128px;
+    }
+
+    .flow .step:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      right: -16px;
+      top: 44%;
+      color: var(--teal);
+      font-weight: 800;
+      font-size: 20px;
+      z-index: 1;
+    }
+
+    .step-num {
+      display: inline-flex;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      align-items: center;
+      justify-content: center;
+      background: var(--teal);
+      color: white;
+      font-weight: 700;
+      margin-bottom: 9px;
+      font-size: 13px;
+    }
+
+    .step-title {
+      display: block;
+      color: var(--navy);
+      font-weight: 750;
+      margin-bottom: 6px;
+    }
+
+    .step-desc {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .timeline {
+      border-left: 4px solid var(--teal);
+      margin: 22px 0 0 12px;
+      padding-left: 24px;
+    }
+
+    .timeline-item {
+      position: relative;
+      margin: 0 0 22px;
+    }
+
+    .timeline-item::before {
+      content: "";
+      position: absolute;
+      left: -34px;
+      top: 5px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--teal);
+      border: 3px solid white;
+      box-shadow: 0 0 0 2px var(--teal);
+    }
+
+    .toc-note {
+      color: rgba(255,255,255,0.62);
+      font-size: 12px;
+      margin-top: 22px;
+    }
+
+    .footer {
+      text-align: center;
+      color: var(--muted);
+      padding: 30px;
+      font-size: 13px;
+    }
+
+    @media (max-width: 1100px) {
+      .cover { grid-template-columns: 1fr; }
+      .cover-right { padding-top: 10px; }
+      .layout { grid-template-columns: 1fr; }
+      aside { position: relative; height: auto; }
+      .flow { grid-template-columns: 1fr; }
+      .flow .step:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -18px; }
+      .grid.two, .grid.three, .grid.four { grid-template-columns: 1fr; }
+    }
+
+    @media print {
+      body { background: white; }
+      .cover { min-height: auto; page-break-after: always; }
+      aside { display: none; }
+      .layout { display: block; }
+      main { padding: 0; max-width: none; }
+      section { box-shadow: none; border-radius: 0; page-break-inside: avoid; }
+      .flow { grid-template-columns: 1fr; }
+      .flow .step::after { display: none; }
+      pre { white-space: pre-wrap; }
+    }
+  </style>
+</head>
+<body>
+  <header class="cover">
+    <div class="cover-left">
+      <div class="title-panel">
+        <div class="eyebrow">Developer Handover</div>
+        <h1>PDF-to-HIP Assessment Extraction</h1>
+        <p class="cover-subtitle">Architecture & design plan for a section-aware, generic-layout, Gen AI powered backend.</p>
+      </div>
+    </div>
+    <div class="cover-right">
+      <div class="status-card">
+        <h2>Final Design Direction</h2>
+        <p>This plan replaces page-by-page extraction and brittle form-specific cleanup with a reusable extraction architecture: PDF layout evidence, document profiling, section-aware extraction, canonical JSON, deterministic normalization, and profile-based Excel export.</p>
+        <div class="status-grid">
+          <div class="pill"><strong>Primary Output</strong>Canonical JSON</div>
+          <div class="pill"><strong>Export Method</strong>Template profile driven</div>
+          <div class="pill"><strong>Complex Forms</strong>Section-by-section</div>
+          <div class="pill"><strong>UI Strategy</strong>Existing SHOWLAY UI retained</div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside>
+      <div class="brand">PDF-to-HIP Design Plan</div>
+      <nav>
+        <a href="#summary">1. Executive Summary</a>
+        <a href="#problem">2. Problem We Are Solving</a>
+        <a href="#scope">3. Scope & Output Columns</a>
+        <a href="#principles">4. Design Principles</a>
+        <a href="#architecture">5. Final Architecture</a>
+        <a href="#stages">6. Pipeline Stages</a>
+        <a href="#agents">7. Agents Needed</a>
+        <a href="#schema">8. Canonical JSON Schema</a>
+        <a href="#profiles">9. Template Profiles</a>
+        <a href="#showlay">10. SHOWLAY Reuse Plan</a>
+        <a href="#aws">11. AWS Services</a>
+        <a href="#api">12. API & UI Contract</a>
+        <a href="#implementation">13. Implementation Plan</a>
+        <a href="#evaluation">14. Evaluation Strategy</a>
+        <a href="#risks">15. Risks & Mitigations</a>
+        <a href="#developer">16. Developer Checklist</a>
+      </nav>
+      <div class="toc-note">Theme inspired by the teal and dark technology palette from the provided reference image.</div>
+    </aside>
+
+    <main>
+      <section id="summary">
+        <span class="badge">Final Version</span>
+        <h2>1. Executive Summary</h2>
+        <p class="lead">
+          The goal is to build a proper, extensible backend that can convert healthcare assessment PDF templates of different layouts into a deterministic structure that can be reviewed and exported into HIP Excel workbooks.
+        </p>
+
+        <div class="callout success">
+          <strong>Final architecture in one line:</strong><br />
+          Section-aware PDF extraction → canonical JSON → deterministic normalization → profile-based Excel export.
+        </div>
+
+        <p>
+          We are not simply patching the current code. The existing SHOWLAY implementation has useful foundations, but the extraction strategy must be redesigned because complex forms such as MNLOC need document-level and section-level context.
+        </p>
+
+        <div class="flow">
+          <div class="step"><span class="step-num">1</span><span class="step-title">PDF Upload</span><div class="step-desc">Healthcare form template PDF.</div></div>
+          <div class="step"><span class="step-num">2</span><span class="step-title">Layout Evidence</span><div class="step-desc">Text, widgets, images, tables, bboxes.</div></div>
+          <div class="step"><span class="step-num">3</span><span class="step-title">Profile Document</span><div class="step-desc">Detect sections and complexity.</div></div>
+          <div class="step"><span class="step-num">4</span><span class="step-title">Extract Sections</span><div class="step-desc">Questions, options, rules, tables.</div></div>
+          <div class="step"><span class="step-num">5</span><span class="step-title">Normalize JSON</span><div class="step-desc">Sequence, validation, references.</div></div>
+          <div class="step"><span class="step-num">6</span><span class="step-title">Review UI</span><div class="step-desc">Human review and edits.</div></div>
+          <div class="step"><span class="step-num">7</span><span class="step-title">Export Excel</span><div class="step-desc">Template-profile based workbook.</div></div>
+        </div>
+      </section>
+
+      <section id="problem">
+        <h2>2. Problem We Are Solving</h2>
+        <p>
+          Healthcare programs use PDF assessment forms that must be converted into HIP Assessment Configuration Workbooks. The current developer tool works reasonably for some simple or medium forms, but fails to generalize to complex layouts like MNLOC.
+        </p>
+
+        <h3>Why the current approach struggles</h3>
+        <table>
+          <tr><th>Issue</th><th>Why it matters</th><th>Required design response</th></tr>
+          <tr><td>Page-by-page extraction</td><td>Complex forms have section-level context, shared legends, skip logic, and item codes spanning pages.</td><td>Process by logical section, not isolated pages.</td></tr>
+          <tr><td>Large form-specific postprocessor</td><td>Many cleanup rules are overfitted to known samples and may break on new forms.</td><td>Replace with generic deterministic normalization.</td></tr>
+          <tr><td>Widget metadata confusion</td><td>AcroForm field names may be cryptic, wrong, or non-semantic.</td><td>Use visible rendered text and spatial layout as source of truth.</td></tr>
+          <tr><td>Golden workbook leakage</td><td>Using human-filled workbook during extraction inflates evaluation results.</td><td>Use golden files only in offline evaluation.</td></tr>
+          <tr><td>Workbook-specific differences</td><td>Different templates use different spellings and conventions.</td><td>Use template profiles during export, not inside extraction.</td></tr>
+        </table>
+
+        <div class="callout warning">
+          <strong>Important:</strong> The system is not extracting user-entered values from filled forms. The samples are blank templates. The task is to extract the form structure: questions, instructions, choices, tables, signatures, validations, and branching rules.
+        </div>
+      </section>
+
+      <section id="scope">
+        <h2>3. Scope & Output Columns</h2>
+        <p>
+          The backend should extract a stable canonical JSON that supports the eight workbook columns currently in scope. Other HIP workbook columns remain manual or business-owned.
+        </p>
+
+        <h3>In-scope target workbook columns</h3>
+        <table>
+          <tr><th>#</th><th>Column</th><th>How it is populated</th></tr>
+          <tr><td>1</td><td>Section</td><td>Derived from visible form headers and logical grouping. Dense in JSON; sparse only during Excel export if profile requires.</td></tr>
+          <tr><td>2</td><td>Sequence</td><td>Generated internally as dense 1-based reading order. Export can write or suppress it based on profile.</td></tr>
+          <tr><td>3</td><td>Question Rule</td><td>Profile-controlled. Default blank unless the PDF clearly defines current-row visibility/applicability.</td></tr>
+          <tr><td>4</td><td>Question Type</td><td>Semantic classification using canonical vocabulary.</td></tr>
+          <tr><td>5</td><td>Question Text</td><td>Visible PDF text, including item codes such as B0200 or GG0170Q5.</td></tr>
+          <tr><td>6</td><td>Branching Logic</td><td>Outgoing skip/show logic. Store both resolved Q-reference and verbatim PDF source.</td></tr>
+          <tr><td>7</td><td>Answer Text</td><td>All answer options for choice fields, separated using line breaks.</td></tr>
+          <tr><td>8</td><td>Answer Validation</td><td>PDF-explicit constraints plus mandatory HIP defaults by question type.</td></tr>
+        </table>
+
+        <h3>Out of scope for v1</h3>
+        <div class="grid two">
+          <div class="mini-card">
+            <h4>Business-owned columns</h4>
+            <p>Auto Populated, Pre Populate, Required, Alert, History, Speech to Text, Submission History, Concept Code, Token ID, Auto Populate with/Field/Rule.</p>
+          </div>
+          <div class="mini-card">
+            <h4>Advanced extraction</h4>
+            <p>Bilingual extraction, Answer Score Value, score calculation, natural-language row correction, and business-only configuration decisions.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="principles">
+        <h2>4. Design Principles</h2>
+        <div class="grid two">
+          <div class="mini-card"><h4>Canonical JSON first</h4><p>The extraction engine produces one stable JSON format. Excel is a derived output.</p></div>
+          <div class="mini-card"><h4>Template profile at export</h4><p>Workbook-specific spellings and conventions are handled by profiles, not by the agent.</p></div>
+          <div class="mini-card"><h4>Visible layout is truth</h4><p>Rendered text and spatial layout are primary. Widgets are supporting evidence only.</p></div>
+          <div class="mini-card"><h4>Section-aware processing</h4><p>Complex PDFs like MNLOC are processed by logical sections, not isolated pages.</p></div>
+          <div class="mini-card"><h4>No golden leakage</h4><p>Human-filled workbooks are used only for offline evaluation, never during extraction.</p></div>
+          <div class="mini-card"><h4>Generic extraction</h4><p>No form-specific code, regexes, title checks, or cleanup rules inside the extraction pipeline.</p></div>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <h2>5. Final Architecture</h2>
+        <pre><code>PDF Upload
+  ↓
+Stage 1: PDF Ingestion / Document Intelligence Layer
+  - PyMuPDF text, widgets, images, bboxes
+  - Optional Textract for scans, tables, forms, selection elements
+  ↓
+Stage 2: Document Profiler Agent
+  - title, version, page count, sections, complexity
+  - decide single-call vs section-by-section
+  ↓
+Stage 3: Section Extraction Agent
+  - extract meaningful rows per section
+  - classify question type
+  - capture options, branching, source evidence
+  ↓
+Stage 4: Global Normalizer
+  - assign sequence
+  - apply HIP validation defaults
+  - resolve item-code branches
+  - validate references
+  - compute confidence
+  ↓
+Stage 5: Review Manifest Builder
+  - convert canonical JSON into SHOWLAY-compatible manifest
+  ↓
+Stage 6: Template Profile Export
+  - apply workbook-specific spelling/conventions
+  - generate Excel
+  ↓
+Existing SHOWLAY UI
+  - review/edit/download</code></pre>
+
+        <div class="callout">
+          <strong>Key architectural decision:</strong> Extraction stages are workbook-agnostic. Workbook-specific behavior starts only during export.
+        </div>
+      </section>
+
+      <section id="stages">
+        <h2>6. Pipeline Stages</h2>
+
+        <h3>Stage 0 — Template Profile Loader</h3>
+        <p>Loads the workbook profile by explicit selection, auto-detection from template headers, or generic fallback. The profile is used only at export time.</p>
+
+        <h3>Stage 1 — PDF Ingestion</h3>
+        <table>
+          <tr><th>Input</th><td>PDF file</td></tr>
+          <tr><th>Tools</th><td>PyMuPDF, page rasterization, Bedrock vision models. Textract remains a future optional layer.</td></tr>
+          <tr><th>Output</th><td>DocStructure with page images, text blocks, widgets, tables, layout blocks, bboxes</td></tr>
+          <tr><th>Rule</th><td>Visible rendered text + spatial layout are primary. Widgets support location/type hints only.</td></tr>
+        </table>
+
+        <h3>Stage 2 — Document Profiler</h3>
+        <p>One LLM call to identify form title, version, page count, sections, shared legends, and extraction strategy.</p>
+        <pre><code>{
+  "form_title": "Medical Necessity and Level of Care Assessment",
+  "form_version": "V.21 Effective 09/01/2025",
+  "complexity": "complex",
+  "sections": [
+    {"name": "Section A. Identification Information", "pages": [1, 2]},
+    {"name": "Section B. Hearing, Speech, and Vision", "pages": [3]}
+  ],
+  "extraction_strategy": "section_by_section"
+}</code></pre>
+
+        <h3>Stage 3 — Section Extractor</h3>
+        <p>The main LLM extraction stage. It receives section pages, text blocks, widgets, tables, shared legends, and all-section context.</p>
+        <div class="callout warning">
+          Extract only meaningful form artifacts. Exclude page numbers, repeated headers, repeated footers, watermarks, decorative separators, and repeated page chrome unless they define required display content.
+        </div>
+
+        <h3>Stage 4 — Global Normalizer</h3>
+        <p>Deterministic Python functions. No form-specific knowledge.</p>
+        <table>
+          <tr><th>Function</th><th>Purpose</th></tr>
+          <tr><td>concatenate_sections</td><td>Merge section outputs in document order.</td></tr>
+          <tr><td>assign_global_sequence</td><td>Create dense 1-based sequence values.</td></tr>
+          <tr><td>build_external_id_index</td><td>Map item codes such as B0100 to sequence numbers.</td></tr>
+          <tr><td>resolve_item_code_branches</td><td>Convert item-code branching to Q-reference form where possible.</td></tr>
+          <tr><td>apply_validation_defaults</td><td>Apply mandatory HIP defaults by question type.</td></tr>
+          <tr><td>validate_branching_refs</td><td>Flag unresolved references; allow forward references.</td></tr>
+          <tr><td>score_confidence</td><td>Generate review risk and confidence scores.</td></tr>
+        </table>
+
+        <h3>Stage 5 — Review Manifest Builder</h3>
+        <p>Wraps canonical JSON in a SHOWLAY-compatible manifest so the existing UI can still render rows, pages, bboxes, and editable fields.</p>
+
+        <h3>Stage 6 — Excel Export</h3>
+        <p>Applies the active template profile and writes the workbook. Excel is derived from canonical JSON.</p>
+      </section>
+
+      <section id="agents">
+        <h2>7. Agents Needed</h2>
+        <p>Keep the agent design practical. Do not create one agent per column. Use a small number of intelligent agents and deterministic services.</p>
+
+        <table>
+          <tr><th>Agent / Service</th><th>Type</th><th>Responsibility</th></tr>
+          <tr><td>Document Profiler Agent</td><td>LLM</td><td>Detect title, version, sections, complexity, shared legends, and extraction strategy.</td></tr>
+          <tr><td>Section Extraction Agent</td><td>LLM</td><td>Extract rows from each section: question type, text, answers, branching, external IDs, source evidence.</td></tr>
+          <tr><td>Extraction QA / Confidence Service</td><td>Mostly deterministic, optional LLM for review</td><td>Detect missing values, invalid types, unresolved references, low-confidence rows.</td></tr>
+          <tr><td>PDF Ingestion Service</td><td>Deterministic</td><td>Text, widgets, images, layout blocks, bboxes, optional Textract output.</td></tr>
+          <tr><td>Normalizer Service</td><td>Deterministic</td><td>Sequence, defaults, references, validation, canonical JSON cleanup.</td></tr>
+          <tr><td>Profile Export Service</td><td>Deterministic</td><td>Map canonical JSON to target Excel workbook.</td></tr>
+        </table>
+
+        <div class="callout success">
+          <strong>Implementation recommendation:</strong> Start with two LLM agents: Document Profiler and Section Extractor. Everything else should be deterministic wherever possible.
+        </div>
+      </section>
+
+      <section id="schema">
+        <h2>8. Canonical JSON Schema</h2>
+        <p>This is the primary product of the extraction engine. Every downstream step depends on this structure.</p>
+
+        <pre><code>{
+  "success": true,
+  "source_file": "MNLOC Blank.pdf",
+  "form_title": "Medical Necessity and Level of Care Assessment",
+  "form_version": "V.21 Effective 09/01/2025",
+  "page_count": 34,
+  "detected_complexity": "complex",
+  "detected_sections": [
+    {
+      "name": "Section B. Hearing, Speech, and Vision",
+      "pages": [3]
+    }
+  ],
+  "rows": [
+    {
+      "sequence": 43,
+      "external_id": "B0100",
+      "section": "Section B. Hearing, Speech, and Vision",
+      "question_type": "Radio Button",
+      "question_text": "B0100. Comatose - Persistent vegetative state/no discernible consciousness",
+      "answer_text": "0. No\n\n1. Yes",
+      "answer_validation": "",
+      "branching_logic": "If Q43 = 1 (Yes), Skip to Q67",
+      "branching_source": "If B0100 = 1 (Yes), Skip to GG0115. Functional Limitation in Range of Motion",
+      "question_rule": "",
+      "source": {
+        "page": 3,
+        "bbox": [45.1, 120.5, 520.3, 190.7],
+        "source_ids": ["T012", "W003"],
+        "source_text": "B0100. Comatose..."
+      },
+      "confidence": 0.93,
+      "review_reasons": []
+    }
+  ],
+  "warnings": []
+}</code></pre>
+
+        <h3>Canonical question types</h3>
+        <div class="grid four">
+          <div class="mini-card">Text Box</div>
+          <div class="mini-card">Text Area</div>
+          <div class="mini-card">Display</div>
+          <div class="mini-card">Checkbox</div>
+          <div class="mini-card">Checkbox Group</div>
+          <div class="mini-card">Radio Button</div>
+          <div class="mini-card">Dropdown</div>
+          <div class="mini-card">Date</div>
+          <div class="mini-card">Number</div>
+          <div class="mini-card">Signature</div>
+          <div class="mini-card">Group Table</div>
+          <div class="mini-card">Equation</div>
+        </div>
+
+        <h3>Validation defaults</h3>
+        <table>
+          <tr><th>Question Type</th><th>Default Answer Validation</th></tr>
+          <tr><td>Text Box</td><td>default characters = 100</td></tr>
+          <tr><td>Text Area</td><td>default characters = 600</td></tr>
+          <tr><td>Date</td><td>Format is mm/dd/yyyy</td></tr>
+          <tr><td>Number</td><td>only allow numeric characters</td></tr>
+          <tr><td>Signature</td><td>blank unless profile requires text</td></tr>
+        </table>
+      </section>
+
+      <section id="profiles">
+        <h2>9. Template Profiles</h2>
+        <p>Template profiles handle workbook-specific differences. The extraction agent remains generic.</p>
+
+        <h3>What profiles control</h3>
+        <table>
+          <tr><th>Profile setting</th><th>Example</th></tr>
+          <tr><td>Column mappings</td><td><code>question_type → QuestionType</code></td></tr>
+          <tr><td>Question type spelling</td><td><code>Radio Button → Radio button</code>, <code>Date → Calendar</code></td></tr>
+          <tr><td>Branching format</td><td><code>q_reference</code> vs <code>verbatim_with_codes</code></td></tr>
+          <tr><td>Question Rule behavior</td><td>write blank, write semantic rule, or duplicate branching logic</td></tr>
+          <tr><td>Sequence export</td><td>write sequence or keep blank</td></tr>
+          <tr><td>Section export</td><td>dense or sparse section column</td></tr>
+          <tr><td>Validation wording</td><td>exact text for HIP defaults</td></tr>
+        </table>
+
+        <h3>Sample profile YAML</h3>
+        <pre><code>profile_id: choices_safety_determination
+workbook_name: CHOICES Safety Determination
+
+sheet_name: "Assessment v2"
+fallback_sheets: ["Assessment"]
+
+column_mappings:
+  section: "Section"
+  sequence: "Sequence"
+  question_rule: "Question Rule"
+  question_type: "QuestionType"
+  question_text: "Question Text"
+  branching_logic: "Branching Logic"
+  answer_text: "Answer Text"
+  answer_validation: "Answer Validation"
+
+question_type_overrides:
+  "Radio Button": "Radio button"
+  "Dropdown": "Dropdown"
+
+branching_format: "q_reference"
+write_sequence: true
+write_question_rule: false
+duplicate_branching_to_rule: false
+sparsify_section: true
+
+validation_defaults:
+  text_box: "default characters = 100"
+  text_area: "default characters = 600"
+  date: "Format is mm/dd/yyyy"
+  number: "only allow numeric characters"
+  signature: ""
+
+unmapped_columns_behavior: blank</code></pre>
+      </section>
+
+      <section id="showlay">
+        <h2>10. SHOWLAY Reuse Plan</h2>
+        <h3>Keep</h3>
+        <table>
+          <tr><th>Component</th><th>Reason</th></tr>
+          <tr><td>PDF rasterization</td><td>Needed for visual analysis and UI page rendering.</td></tr>
+          <tr><td>Widget extraction</td><td>Useful as supporting evidence and bbox traceability.</td></tr>
+          <tr><td>Text layout extraction</td><td>Important for source grounding.</td></tr>
+          <tr><td>Source ID / bbox grounding</td><td>Needed for review UI and confidence scoring.</td></tr>
+          <tr><td>Confidence scoring</td><td>Useful for human-in-the-loop review.</td></tr>
+          <tr><td>Review manifest</td><td>Existing UI depends on it.</td></tr>
+          <tr><td>Excel writer</td><td>Can be reused as profile-driven export.</td></tr>
+          <tr><td>Existing UI endpoints</td><td>Avoid UI rewrite in v1.</td></tr>
+        </table>
+
+        <h3>Replace or heavily refactor</h3>
+        <table>
+          <tr><th>Component</th><th>Decision</th></tr>
+          <tr><td>Page-by-page VLM extraction</td><td>Replace with document profiling + section extraction.</td></tr>
+          <tr><td>38-stage postprocessing</td><td>Replace with small generic normalizer.</td></tr>
+          <tr><td>Form-specific regex cleanup</td><td>Remove from extraction pipeline.</td></tr>
+          <tr><td>truth_path / golden workbook usage</td><td>Remove from production extraction; evaluation only.</td></tr>
+          <tr><td>Hardcoded template assumptions</td><td>Move to template profiles.</td></tr>
+        </table>
+      </section>
+
+      <section id="aws">
+        <h2>11. AWS Services</h2>
+        <p>The recommended design is AWS-first because the team already has access to Amazon Bedrock. Alternatives can be benchmarked later if needed.</p>
+
+        <h3>Amazon Bedrock</h3>
+        <p>Used for the LLM agents: document profiling and section extraction. Model IDs should be configurable and benchmark-driven.</p>
+
+        <h3>Amazon Textract</h3>
+        <p>Optional document intelligence layer for scanned PDFs, table-heavy pages, checkboxes/selection elements, signatures, and cases where PyMuPDF layout extraction is unreliable.</p>
+
+        <div class="callout">
+          <strong>Textract is not the semantic extractor.</strong> It provides OCR/layout/table/form evidence. The LLM/agent still performs HIP question type classification, grouping, option interpretation, and branching interpretation.
+        </div>
+
+        <div class="callout warning">
+          <strong>Current access constraint:</strong> Textract access is not available for the POC right now. Keep it in the architecture as a future feature-flagged document-intelligence layer, but do not implement Textract calls or make v1 acceptance depend on Textract output.
+        </div>
+
+        <h3>Model selection rule</h3>
+        <table>
+          <tr><th>Model</th><th>Model ID</th><th>Use</th></tr>
+          <tr><td>Amazon Nova 2 Lite</td><td><code>us.amazon.nova-2-lite-v1:0</code></td><td>Default for document profiling and simple/medium section extraction.</td></tr>
+          <tr><td>Amazon Nova Pro</td><td><code>us.amazon.nova-pro-v1:0</code></td><td>Escalation for complex sections such as MNLOC, coded scales, scoring, and heavy branching.</td></tr>
+          <tr><td>Qwen3-VL</td><td><code>qwen.qwen3-vl-235b-a22b</code></td><td>Current SHOWLAY baseline and strict-region fallback.</td></tr>
+          <tr><td>Mistral Large 3</td><td><code>mistral.mistral-large-3-675b-instruct</code></td><td>Complex-section fallback and benchmark contender.</td></tr>
+          <tr><td>Kimi K2.5</td><td><code>moonshotai.kimi-k2.5</code></td><td>Hard retry or benchmark contender for low-confidence complex sections.</td></tr>
+        </table>
+
+        <div class="callout">
+          Use the <code>us.</code> Nova inference-profile IDs above. Direct Nova model IDs may fail when on-demand throughput is unsupported. Every listed candidate supports image input; text-only models are not valid for page-image extraction.
+        </div>
+
+        <p>Final model selection should be based on benchmark results in the target AWS account and region. The benchmark cycle should compare Nova 2 Lite throughout, Nova 2 Lite with Nova Pro escalation, Qwen3-VL under the new section-aware pipeline, the existing SHOWLAY Qwen baseline, Mistral Large 3 escalation, and Kimi K2.5 retry. Add Textract-augmented variants only after access is granted.</p>
+      </section>
+
+      <section id="api">
+        <h2>12. API & UI Contract</h2>
+        <p>For v1, keep the existing SHOWLAY UI working. The new backend should expose compatible endpoints and manifest structure.</p>
+
+        <table>
+          <tr><th>Endpoint</th><th>Purpose</th></tr>
+          <tr><td>POST /extract</td><td>Upload PDF and start extraction job.</td></tr>
+          <tr><td>GET /status/{job_id}</td><td>Poll extraction progress.</td></tr>
+          <tr><td>GET /page-image/{job_id}/{page_no}</td><td>Serve page image for review UI.</td></tr>
+          <tr><td>GET /manifest-data/{job_id}</td><td>Return review manifest JSON.</td></tr>
+          <tr><td>POST /manifest-data/{job_id}</td><td>Save user edits and regenerate outputs.</td></tr>
+          <tr><td>GET /workbench/{job_id}</td><td>Open existing workbench UI.</td></tr>
+          <tr><td>GET /download/{job_id}</td><td>Download generated Excel.</td></tr>
+          <tr><td>GET /review/{job_id}</td><td>Download review workbook/sidecar.</td></tr>
+        </table>
+
+        <div class="callout success">
+          The extraction engine’s primary output is canonical JSON. Backend Excel generation remains for v1 compatibility. Long term, Excel export can move to UI without changing the extraction engine.
+        </div>
+      </section>
+
+      <section id="implementation">
+        <h2>13. Implementation Plan</h2>
+
+        <div class="timeline">
+          <div class="timeline-item">
+            <h3>Phase 1 — Foundation</h3>
+            <p>Set up backend structure, preserve existing UI endpoints, port PyMuPDF probe/rasterization, add schemas, add profile loader, create manifest contract test.</p>
+            <p><strong>Acceptance:</strong> Existing UI loads, PDF can be uploaded, page images render, fixed manifest works in workbench.</p>
+          </div>
+
+          <div class="timeline-item">
+            <h3>Phase 2 — Simple Form Path</h3>
+            <p>Implement document profiler and single-call section extractor for simple/small forms. Add normalizer, manifest builder, profile-based export.</p>
+            <p><strong>Acceptance:</strong> H1700-3 and CHOICES meet target accuracy, full upload-review-edit-download flow works.</p>
+          </div>
+
+          <div class="timeline-item">
+            <h3>Phase 3 — Section-Aware Complex Path</h3>
+            <p>Add section-by-section extraction, shared legend carry-forward, external ID index, item-code branch resolution, MNLOC profile.</p>
+            <p><strong>Acceptance:</strong> MNLOC processes all 34 pages without crash, all sections navigable, item-code branching preserved.</p>
+          </div>
+
+          <div class="timeline-item">
+            <h3>Phase 4 — Evaluation & Benchmarking</h3>
+            <p>Benchmark the configured model cycle: Nova 2 Lite, Nova Pro escalation, Qwen3-VL, Mistral Large 3, and Kimi K2.5. Add Textract combinations only after access is granted. Evaluate on sample forms plus at least one novel form outside the sample set.</p>
+            <p><strong>Acceptance:</strong> Accuracy/cost dashboard and final production model recommendation.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="evaluation">
+        <h2>14. Evaluation Strategy</h2>
+        <p>Golden workbooks are used only for offline evaluation. They must never be read during extraction.</p>
+
+        <h3>Per-dimension metrics</h3>
+        <table>
+          <tr><th>Metric</th><th>Meaning</th></tr>
+          <tr><td>Row recall</td><td>Did the system find expected questions, display rows, and tables?</td></tr>
+          <tr><td>Row precision</td><td>Are extracted rows real form artifacts?</td></tr>
+          <tr><td>Question Text accuracy</td><td>Fuzzy match against expected text.</td></tr>
+          <tr><td>Question Type accuracy</td><td>Exact match after canonical normalization.</td></tr>
+          <tr><td>Answer Text completeness</td><td>Expected options recovered for choice rows.</td></tr>
+          <tr><td>Branching Logic correctness</td><td>Skip/show logic captured correctly.</td></tr>
+          <tr><td>Answer Validation correctness</td><td>HIP defaults and explicit constraints applied.</td></tr>
+          <tr><td>Section assignment accuracy</td><td>Rows assigned to correct section.</td></tr>
+          <tr><td>Sequence/order correctness</td><td>Rows in correct relative order.</td></tr>
+          <tr><td>Question Rule appropriateness</td><td>Only where PDF clearly implies current-row rule.</td></tr>
+        </table>
+
+        <div class="callout warning">
+          A single overall score can hide failures. For example, question text can be correct while branching logic is poor. Report metrics separately.
+        </div>
+      </section>
+
+      <section id="risks">
+        <h2>15. Risks & Mitigations</h2>
+        <table>
+          <tr><th>Risk</th><th>Impact</th><th>Mitigation</th></tr>
+          <tr><td>UI contract drift</td><td>Existing workbench may break silently.</td><td>Add manifest contract tests in Phase 1.</td></tr>
+          <tr><td>Section detection fails on novel forms</td><td>Poor extraction quality.</td><td>Profiler confidence + fallback to whole-document or page-range extraction.</td></tr>
+          <tr><td>Page chrome extracted as rows</td><td>Duplicate/noisy output.</td><td>Prompt excludes page numbers, repeated headers, footers, watermarks, decorative separators.</td></tr>
+          <tr><td>Hallucinated branching refs</td><td>Invalid rules.</td><td>Normalizer validates all Q references and external IDs. Forward references are allowed; unresolved refs flagged.</td></tr>
+          <tr><td>Overuse of expensive model</td><td>Cost increase.</td><td>Model escalation based on complexity; benchmark and tune thresholds.</td></tr>
+          <tr><td>Textract overuse</td><td>Unnecessary per-page cost.</td><td>Route selectively: scans, tables, selection elements, unreliable layout.</td></tr>
+          <tr><td>Generic-layout promise too broad</td><td>Unrealistic expectations.</td><td>Bound scope to healthcare assessment/configuration form templates.</td></tr>
+        </table>
+      </section>
+
+      <section id="developer">
+        <h2>16. Developer Checklist</h2>
+        <h3>Do</h3>
+        <ul>
+          <li>Produce canonical JSON as the primary extraction output.</li>
+          <li>Keep section names dense in JSON.</li>
+          <li>Apply section sparsification only during export if profile requires it.</li>
+          <li>Use visible text and layout as primary truth.</li>
+          <li>Use widgets as supporting evidence only.</li>
+          <li>Allow forward branching references.</li>
+          <li>Use golden workbooks only in offline evaluation.</li>
+          <li>Keep existing UI manifest contract backward-compatible.</li>
+          <li>Keep model IDs configurable.</li>
+          <li>Benchmark model choices before production selection.</li>
+        </ul>
+
+        <h3>Do not</h3>
+        <ul>
+          <li>Do not hardcode CHOICES, MNLOC, H1700-3, or other form-specific strings in extraction code.</li>
+          <li>Do not use AcroForm field names as question text without visible-label validation.</li>
+          <li>Do not use the golden workbook during extraction.</li>
+          <li>Do not recreate the 38-stage postprocessor.</li>
+          <li>Do not ask the LLM to generate Excel directly.</li>
+          <li>Do not treat page numbers, repeated headers, or footers as rows unless they are meaningful instructions.</li>
+          <li>Do not remove fields from the existing manifest contract.</li>
+        </ul>
+
+        <div class="callout success">
+          <strong>Final acceptance statement:</strong> This design is acceptable for implementation planning after the remaining wording cleanup: replace any remaining “7 columns” with “8 columns, with Question Rule profile-controlled/default blank,” and keep model references configurable/benchmark-driven.
+        </div>
+      </section>
+
+      <div class="footer">
+        PDF-to-HIP Assessment Extraction Architecture Plan • Generated for developer handover
+      </div>
+    </main>
+  </div>
+</body>
+</html>

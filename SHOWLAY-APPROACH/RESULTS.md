@@ -100,12 +100,12 @@ PDF
 
 ```bash
 cd "SHOWLAY-APPROACH"
-python run.py "support_docs/sph_rev25-3_H1700-3_final_approved.pdf" \
-              "support_docs/TX LTSS - 1700-3, Individual Service Plan - Signature Page.xlsx" \
+python run.py "support_docs/tx-ltss-h1700-3-signature-page-source.pdf" \
+              "support_docs/tx-ltss-h1700-3-signature-page-hip-workbook.xlsx" \
               --name TXLTSS
 
-python run.py "support_docs/CHOICES Safety Determination Form.pdf" \
-              "support_docs/CHOICES Safety Determination Request Form Final_11_20.xlsx" \
+python run.py "support_docs/choices-safety-determination-source.pdf" \
+              "support_docs/choices-safety-determination-hip-workbook.xlsx" \
               --name CHOICES
 
 # replay cached VLM through new postprocess (no Bedrock call):
