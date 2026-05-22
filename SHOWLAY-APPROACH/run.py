@@ -2,13 +2,13 @@
 """
 End-to-end driver:
 
-  python run.py <pdf_path> <truth_xlsx> [--name <stem>] [--no-eval]
+  python run.py <pdf_path> [template_xlsx] [--name <stem>] [--eval-truth <truth_xlsx>]
 
 Outputs (under SHOWLAY-APPROACH/runtime/output/<stem>/):
-  - <stem>.xlsx                 final 28-column workbook (template-cloned)
+  - <stem>.xlsx                 final workbook using the template's Assessment sheet
   - <stem>_review.xlsx          companion human-review queue
   - <stem>_review_manifest.json field-level review artifact with page evidence
-  - <stem>_raw_vlm.json         raw per-page VLM JSON (for debug)
+  - raw_agent_rows.json         raw section-agent rows (for debug)
   - <stem>_telemetry.json       per-page latency + token usage
 And under SHOWLAY-APPROACH/eval_reports/<stem>/:
   - summary.json, summary.md    eval vs truth
@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import time
 from pathlib import Path
 
@@ -27,26 +26,26 @@ from dotenv import load_dotenv
 THIS_DIR = Path(__file__).resolve().parent
 load_dotenv(THIS_DIR / ".env")
 
+from showlay.agentic import extract_document_agentic
 from showlay.confidence import score_rows
 from showlay.eval import evaluate
-from showlay.extract import extract_document, probe_and_rasterize, vlm_dicts_to_rows
+from showlay.extract import probe_and_rasterize
 from showlay.field_review import build_review_manifest, write_review_manifest
-from showlay.paths import RUNTIME_DIR
-from showlay.postprocess import run_all as postprocess_all
+from showlay.paths import RUNTIME_DIR, default_template_path
 from showlay.writer import write_review_sidecar, write_workbook
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("pdf", help="path to source PDF")
-    p.add_argument("truth", help="path to truth Excel (used as TEMPLATE for output AND for eval)")
+    p.add_argument("template", nargs="?", default=None, help="optional HIP workbook template path")
     p.add_argument("--name", default=None, help="output stem; defaults to pdf basename")
-    p.add_argument("--no-eval", action="store_true")
+    p.add_argument("--eval-truth", default=None, help="optional golden workbook for offline eval only")
     p.add_argument("--dpi", type=int, default=200)
     args = p.parse_args()
 
     pdf_path = str(Path(args.pdf).resolve())
-    truth_path = str(Path(args.truth).resolve())
+    template_path = str(Path(args.template).resolve()) if args.template else str(default_template_path())
     stem = args.name or Path(pdf_path).stem.replace(" ", "_")[:60]
 
     out_dir = RUNTIME_DIR / "output" / stem
@@ -57,7 +56,7 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
 
     print(f"\n>>> SHOWLAY pipeline:  {Path(pdf_path).name}")
-    print(f"    truth template:     {Path(truth_path).name}")
+    print(f"    template metadata:  {Path(template_path).name}")
 
     t0 = time.time()
     # 1+2. probe + rasterize + structural
@@ -65,20 +64,23 @@ def main():
     doc = probe_and_rasterize(pdf_path, str(img_dir), dpi=args.dpi)
     print(f"      {doc.page_count} page(s), AcroForm={doc.has_acroform}")
 
-    # 3. VLM extract
-    print("\n[2/7] Qwen3-VL extraction ...")
-    model_id = os.environ.get("BEDROCK_VLM_MODEL_ID", "qwen.qwen3-vl-235b-a22b")
-    raw, telemetry = extract_document(doc, model_id=model_id, verbose=True)
-    (debug_dir / "raw_vlm.json").write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    print("\n[2/7] section-aware Bedrock agent ...")
+
+    def progress(stage: str, message: str, done: int | None, total: int | None) -> None:
+        suffix = f" ({done}/{total})" if done is not None and total else ""
+        print(f"      {stage}: {message}{suffix}")
+
+    result = extract_document_agentic(doc, progress=progress)
+    raw = result.raw_rows
+    telemetry = result.telemetry
+    rows = result.rows
+    (debug_dir / "raw_agent_rows.json").write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
     (debug_dir / "telemetry.json").write_text(json.dumps(telemetry, indent=2), encoding="utf-8")
-
-    rows = vlm_dicts_to_rows(raw)
-    print(f"      VLM produced {len(rows)} row dicts")
-
-    # 4. post-process
-    print("\n[3/7] post-process (sequence, sections, branching) ...")
-    rows = postprocess_all(rows, doc_struct=doc, truth_path=truth_path)
-    print(f"      after post-process: {len(rows)} rows")
+    (debug_dir / "profile.json").write_text(
+        json.dumps(result.profile.model_dump(), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    print(f"      agent produced {len(rows)} normalized rows")
 
     # 5. confidence
     print("\n[4/7] confidence scoring ...")
@@ -98,8 +100,10 @@ def main():
         telemetry=telemetry,
         run_id=stem,
         source_pdf=pdf_path,
-        template_path=truth_path,
+        template_path=template_path,
     )
+    review_manifest["canonical"] = result.canonical_meta(doc)
+    review_manifest["warnings"] = result.warnings
     review_manifest_path = out_dir / f"{stem}_review_manifest.json"
     write_review_manifest(review_manifest_path, review_manifest)
     summary = review_manifest["summary"]
@@ -115,15 +119,16 @@ def main():
     out_xlsx = out_dir / f"{stem}.xlsx"
     review_xlsx = out_dir / f"{stem}_review.xlsx"
     print("\n[6/7] writing workbooks ...")
-    write_workbook(truth_path, str(out_xlsx), rows)
+    write_workbook(template_path, str(out_xlsx), rows)
     write_review_sidecar(str(review_xlsx), rows)
     print(f"      {out_xlsx}")
     print(f"      {review_xlsx}")
     print(f"      {review_manifest_path}")
 
     # 7. eval
-    if not args.no_eval:
-        print("\n[7/7] eval vs truth ...")
+    if args.eval_truth:
+        print("\n[7/7] offline eval vs truth ...")
+        truth_path = str(Path(args.eval_truth).resolve())
         summary = evaluate(str(out_xlsx), truth_path, str(eval_dir))
         print(f"      candidate={summary['candidate_rows']}  truth={summary['truth_rows']}  "
               f"matched={summary['matched']}")

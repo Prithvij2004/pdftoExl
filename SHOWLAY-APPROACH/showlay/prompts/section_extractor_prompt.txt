@@ -1,0 +1,39 @@
+You are extracting question and answer (if exist) as rows from one section of a healthcare PDF form template.
+Visible rendered text and spatial layout are primary. AcroForm widgets are supporting evidence only.
+Do not treat widget names like Text2 as question text. Blank widget values are not answer values.
+Emit every meaningful form artifact: questions, input fields, choice groups, section markers, instructional display text, signature lines, and true data tables. Exclude repeated headers, footers, page numbers, agency banners, watermarks, and decorative separators unless they define a section or required instruction.
+Forward references are valid. Return only via the provided tool schema.
+
+Question type definitions:
+- Text Box: short single-line free text field.
+- Text Area: longer multi-line free text field.
+- Display: static instruction, legal text, explanatory text, section title, or other visible content with no user input.
+- Checkbox: one standalone checked/unchecked item with no peer options.
+- Checkbox Group: multiple options where the user may select more than one; use for "check all that apply" style prompts.
+- Radio Button: multiple options where the user should select exactly one answer.
+- Dropdown: compact single-select menu style field.
+- Date: date field, including DOB, begin date, end date, revision date, or mm/dd/yyyy-style input.
+- Number: numeric-only field, including score, amount, count, age, quantity, or total.
+- Equation: calculated field or subtotal/total derived from other fields.
+- Signature: signature line or signature control.
+- Group Table: repeatable table/grid parent; emit table columns or child fields as following rows when visible.
+
+Field conventions:
+- Question Type: use the taxonomy defined above. Section titles and section boundary markers are Display rows.
+- Question Text: use only the visible label, prompt, title, or instruction text. Keep source item codes such as B0100 or A0310A when they are printed with the prompt, but do not move answer options into Question Text.
+- Answer Text: fill this for Radio Button, Dropdown, and Checkbox Group rows. Preserve printed option codes and labels, and separate options with exactly two newlines. Standalone Checkbox rows usually have blank Answer Text.
+- Branching Logic: use the workbook convention Q{sequence_number}, not source item codes, for referenced questions. Examples: If Q18 = "P"; Display if Q7 = Other; If Q16 = checked(selected). If the PDF wording uses codes such as B0100 or GG0115, convert the referenced questions to Q numbers in branching_logic when confidently identifiable.
+- Question Rule: the workbook description defines this as the requirement to show a question, for example eligibility or display requirements such as age/sex/answer-based rules. Leave it blank unless the PDF clearly gives that requirement. When populated, use the same Q{sequence_number} convention instead of source item codes.
+- branching_source: when the PDF gives skip, display, or applicability wording, preserve the original visible wording here, including item codes such as B0100 or GG0115. This supports review and branch resolution; it does not replace the Q-reference Branching Logic field.
+- external_id: when a printed item/code clearly identifies the row, capture that code here, for example B0100, A0310A, or GG0115. Keep the printed code in Question Text too when it is part of the visible prompt.
+- source_ids: list the T### and W### ids from the provided text blocks and widgets that support the row. Prefer the closest visible label/prompt text ids; add widget ids only as supporting evidence.
+- These metadata fields are internal traceability fields. Do not create new workbook columns, do not copy them into Answer Text, and do not change the Branching Logic convention.
+
+Document title: $document_title
+Document version: $document_version
+All sections: $all_sections
+Shared legends: $shared_legends
+This section: $section_name, pages $section_pages
+Current page chunk $chunk_number of $chunk_count: $page_numbers
+Text blocks: $text_blocks
+Widgets: $widgets

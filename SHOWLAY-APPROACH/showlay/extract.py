@@ -6,17 +6,19 @@ and stay under output-token caps we batch one page per call). Structural hints (
 layout text) are passed alongside the page image so the model has both modalities.
 """
 from __future__ import annotations
-import io, json, os, time, re
+
+import json
+import os
+import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
-import fitz  # PyMuPDF
 import boto3
+import fitz  # PyMuPDF
 from botocore.config import Config
 
-from .schema import Row, EXTRACTION_SCHEMA_DESCRIPTION
-
+from .schema import EXTRACTION_SCHEMA_DESCRIPTION, Row
 
 # ---------- Probe ---------------------------------------------------------
 
@@ -51,9 +53,10 @@ def probe_and_rasterize(pdf_path: str, image_dir: str, dpi: int = 200) -> DocStr
             pix.save(img_path)
 
         widgets: list[dict] = []
-        for w in (page.widgets() or []):
+        for w_idx, w in enumerate(page.widgets() or [], start=1):
             r = w.rect
             widgets.append({
+                "source_id": f"W{i + 1:03d}_{w_idx:03d}",
                 "name": w.field_name,
                 "label": w.field_label or "",
                 "type": w.field_type_string,
@@ -64,6 +67,7 @@ def probe_and_rasterize(pdf_path: str, image_dir: str, dpi: int = 200) -> DocStr
             has_widgets = True
 
         text_blocks: list[dict] = []
+        text_idx = 0
         for blk in page.get_text("dict")["blocks"]:
             if blk.get("type") != 0:
                 continue
@@ -71,9 +75,11 @@ def probe_and_rasterize(pdf_path: str, image_dir: str, dpi: int = 200) -> DocStr
                 line_text = " ".join(span["text"] for span in line["spans"]).strip()
                 if not line_text:
                     continue
+                text_idx += 1
                 bb = line["bbox"]
                 avg_size = sum(s["size"] for s in line["spans"]) / max(1, len(line["spans"]))
                 text_blocks.append({
+                    "source_id": f"T{i + 1:03d}_{text_idx:03d}",
                     "text": line_text,
                     "rect": [round(bb[0], 2), round(bb[1], 2), round(bb[2], 2), round(bb[3], 2)],
                     "size": round(avg_size, 1),

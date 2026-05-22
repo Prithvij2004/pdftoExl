@@ -5,15 +5,16 @@ Layers used in v1:
   - schema_present : did the model emit a non-empty question_type AND question_text?
   - type_known     : is question_type in our known vocabulary?
   - span_grounded  : does question_text appear (fuzzy >= 0.7 token overlap) in the page's text layout?
-  - branching_ref  : if branching_logic references Q<n>, does Q<n> exist with a smaller sequence?
+  - branching_ref  : if branching_logic references Q<n>, does Q<n> exist?
 
 Output: r.confidence in [0,1] and r.review_reasons[] populated.
 """
 from __future__ import annotations
+
 import re
 from difflib import SequenceMatcher
-from .schema import Row, QUESTION_TYPES
 
+from .schema import QUESTION_TYPES, Row
 
 _VOCAB = {q.lower() for q in QUESTION_TYPES}
 
@@ -34,7 +35,7 @@ def score_rows(rows: list[Row], page_text_by_page: dict[int, str]) -> list[Row]:
     seq_set = {r.sequence for r in rows if r.sequence is not None}
 
     for r in rows:
-        reasons: list[str] = []
+        reasons: list[str] = list(r.review_reasons)
         score = 1.0
 
         # 1. schema_present
@@ -63,8 +64,8 @@ def score_rows(rows: list[Row], page_text_by_page: dict[int, str]) -> list[Row]:
                     reasons.append("not_grounded_in_page_text")
                     score -= 0.25
 
-        # 4. branching_ref
-        bl = r.branching_logic or ""
+        # 4. branching_ref. Forward refs are allowed because skip logic can point later.
+        bl = r.question_rule or r.branching_logic or ""
         if bl:
             m = re.search(r"q(\d+)", bl, re.I)
             if m:
@@ -72,9 +73,6 @@ def score_rows(rows: list[Row], page_text_by_page: dict[int, str]) -> list[Row]:
                 if ref not in seq_set:
                     reasons.append(f"branching_ref_missing:Q{ref}")
                     score -= 0.2
-                elif r.sequence is not None and ref >= r.sequence:
-                    reasons.append(f"branching_forward_ref:Q{ref}")
-                    score -= 0.1
 
         r.confidence = max(0.0, min(1.0, round(score, 3)))
         r.review_reasons = reasons

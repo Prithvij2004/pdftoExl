@@ -1,21 +1,26 @@
-"""Run SHOWLAY pipeline on the 3 new PDFs. No truth ground-truth available, so:
-  - clone the CHOICES truth as the default 28-col template
+# ruff: noqa: E402
+"""Run the section-aware SHOWLAY pipeline on the 3 new PDFs. No truth workbook is used, so:
+  - keep the default template path only as UI metadata
   - skip eval
   - produce both <stem>.xlsx and <stem>_review.xlsx
 """
 from __future__ import annotations
-import json, os, time
+
+import json
+import os
+import time
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 THIS = Path(__file__).resolve().parent
 load_dotenv(THIS / ".env")
 
-from showlay.extract import probe_and_rasterize, extract_document, vlm_dicts_to_rows
-from showlay.postprocess import run_all
+from showlay.agentic import extract_document_agentic
 from showlay.confidence import score_rows
+from showlay.extract import probe_and_rasterize
 from showlay.paths import RUNTIME_DIR, app_path, default_template_path
-from showlay.writer import write_workbook, write_review_sidecar
+from showlay.writer import write_review_sidecar, write_workbook
 
 TEMPLATE = default_template_path()
 SOURCE_DIR = Path(os.environ.get("SHOWLAY_NEW_PDF_DIR", app_path("new_pdf_files")))
@@ -41,24 +46,24 @@ for stem, fname in PDFS:
     debug_dir.mkdir(parents=True, exist_ok=True)
 
     t0 = time.time()
-    print(f"[1/5] probe + rasterize ...")
+    print("[1/4] probe + rasterize ...")
     doc = probe_and_rasterize(str(pdf), str(img_dir), dpi=200)
     print(f"      {doc.page_count} page(s), AcroForm={doc.has_acroform}")
 
-    print(f"[2/5] Qwen3-VL extraction ({doc.page_count} pages, ~30s/page expected) ...")
-    model_id = os.environ.get("BEDROCK_VLM_MODEL_ID", "qwen.qwen3-vl-235b-a22b")
-    raw, telemetry = extract_document(doc, model_id=model_id, verbose=True)
-    (debug_dir / "raw_vlm.json").write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    print("[2/4] section-aware Bedrock agent ...")
+    result = extract_document_agentic(doc)
+    raw = result.raw_rows
+    telemetry = result.telemetry
+    rows = result.rows
+    (debug_dir / "raw_agent_rows.json").write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
     (debug_dir / "telemetry.json").write_text(json.dumps(telemetry, indent=2), encoding="utf-8")
+    (debug_dir / "profile.json").write_text(
+        json.dumps(result.profile.model_dump(), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    print(f"      agent produced {len(rows)} normalized rows")
 
-    rows = vlm_dicts_to_rows(raw)
-    print(f"      VLM produced {len(rows)} raw rows")
-
-    print(f"[3/5] post-process ...")
-    rows = run_all(rows, doc_struct=doc, truth_path=str(TEMPLATE))
-    print(f"      after post-process: {len(rows)} rows")
-
-    print(f"[4/5] confidence ...")
+    print("[3/4] confidence ...")
     page_text_by_page = {p.page_index + 1: " ".join(t["text"] for t in p.text_blocks)
                          for p in doc.pages}
     rows = score_rows(rows, page_text_by_page)
@@ -66,7 +71,7 @@ for stem, fname in PDFS:
     n_low = sum(1 for r in rows if r.confidence < 0.7)
     print(f"      conf high>=0.9: {n_high}  low<0.7: {n_low}")
 
-    print(f"[5/5] write workbooks ...")
+    print("[4/4] write workbooks ...")
     out_xlsx = out_dir / f"{stem}.xlsx"
     review_xlsx = out_dir / f"{stem}_review.xlsx"
     write_workbook(str(TEMPLATE), str(out_xlsx), rows)

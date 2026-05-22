@@ -105,11 +105,13 @@ FIELD_HEADER_ALIASES: dict[str, list[str]] = {
     "submission_history":   ["Submission History (Yes / No)"],
     "concept_code":         ["Concept Code (for Migration use only)", "Concept Code"],
     "sequence":             ["Sequence"],
+    "external_id":          ["External ID"],
     "question_rule":        ["Question Rule"],
     "question_type":        ["QuestionType", "Question Type"],
     "question_text":        ["Question Text", "English Question/Index Text",
                              "English Question / Index Text"],
     "branching_logic":      ["Branching Logic"],
+    "branching_source":     ["Branching Source"],
     "answer_text":          ["Answer Text", "English Answer Text"],
     "answer_validation":    ["Answer Validation"],
     "answer_score_value":   ["Answer Score Value"],
@@ -124,6 +126,9 @@ FIELD_HEADER_ALIASES: dict[str, list[str]] = {
     "alert_text":           ["Alert Text"],
     "token_id":             ["Token ID (PDF Generation)", "Token ID"],
     "it_notes":             ["IT Notes"],
+    "source_page":          ["Source Page"],
+    "risk_level":           ["Risk Level"],
+    "review_notes":         ["Review Notes"],
 }
 
 
@@ -184,6 +189,9 @@ class Row(BaseModel):
     bbox: list[float] | None = None    # [x0,y0,x1,y1] PDF coords
     confidence: float = 0.0
     review_reasons: list[str] = Field(default_factory=list)
+    external_id: str = ""
+    branching_source: str = ""
+    source_ids: list[str] = Field(default_factory=list)
 
     def to_excel_cells(self) -> list:
         """Return 28-cell list in column order matching the gold template."""
