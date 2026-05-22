@@ -94,3 +94,35 @@ def test_save_manifest_writes_normalized_json_and_outputs(tmp_path, monkeypatch)
     assert calls["workbook"][1] == str(tmp_path / "abc123.xlsx")
     assert calls["workbook"][2][0].question_text == "Applicant Name"
     assert calls["review_workbook"][0] == str(tmp_path / "abc123_review.xlsx")
+
+
+def test_workbench_view_has_export_and_edit_route(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "OUTPUT_DIR", tmp_path)
+    (tmp_path / "abc123_review_manifest.json").write_text(
+        json.dumps(_manifest()), encoding="utf-8"
+    )
+
+    view = webapp.workbench("abc123")
+    view_html = view.body.decode()
+    assert 'id="exportWorkbook"' in view_html
+    assert 'href="/workbench/abc123/edit"' in view_html
+    assert 'id="pageSelect"' in view_html
+    assert "function changePage(delta)" in view_html
+    assert "function rowPage(row)" in view_html
+    assert "JSON output" in view_html
+
+    editor = webapp.workbench_edit("abc123")
+    editor_html = editor.body.decode()
+    assert "Review details" in editor_html
+    assert "saved=1" in editor_html
+
+
+def test_download_serves_current_workbook_without_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(webapp, "JOBS", {})
+    (tmp_path / "abc123.xlsx").write_bytes(b"updated workbook")
+
+    response = webapp.download("abc123")
+
+    assert Path(response.path) == tmp_path / "abc123.xlsx"
+    assert response.headers["cache-control"] == "no-store"

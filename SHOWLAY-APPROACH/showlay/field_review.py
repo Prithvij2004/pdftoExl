@@ -12,6 +12,7 @@ import re
 from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from .schema import QUESTION_TYPES, Row
@@ -23,6 +24,9 @@ REVIEW_FIELDS = [
     "question_type",
     "question_text",
     "branching_logic",
+    "question_rule",
+    "external_id",
+    "branching_source",
     "answer_text",
     "answer_validation",
     "section",
@@ -330,6 +334,53 @@ def _page_for_row(row: Row, pages: dict[int, Any]) -> Any:
     return pages.get(int(row.page or 0))
 
 
+def _page_no(page: Any) -> int:
+    return int(getattr(page, "page_index", 0)) + 1
+
+
+def _resolve_row_page(row: Row, pages: dict[int, Any]) -> tuple[int | None, Any]:
+    """Use text evidence to recover from rows assigned to the first page of a chunk."""
+    current_page_no = int(row.page or 0) or None
+    current_page = pages.get(current_page_no or 0)
+    if not pages or not (row.question_text or "").strip():
+        return current_page_no, current_page
+
+    scored_pages: list[tuple[float, int, Any, dict[str, Any]]] = []
+    for page_no, page in pages.items():
+        evidence = _best_text_evidence(row.question_text or "", page)
+        score = float(evidence.get("score") or 0)
+        if evidence.get("span") is not None:
+            score += 0.08
+        scored_pages.append((score, page_no, page, evidence))
+
+    if not scored_pages:
+        return current_page_no, current_page
+
+    scored_pages.sort(key=lambda item: item[0], reverse=True)
+    best_score, best_page_no, best_page, best_evidence = scored_pages[0]
+    if best_score < 0.45:
+        return current_page_no, current_page
+    if current_page is None:
+        return best_page_no, best_page
+    if best_page_no == current_page_no:
+        return current_page_no, current_page
+
+    current_evidence = _best_text_evidence(row.question_text or "", current_page)
+    current_score = float(current_evidence.get("score") or 0)
+    current_overlap = float(current_evidence.get("token_overlap") or 0)
+    best_overlap = float(best_evidence.get("token_overlap") or 0)
+    best_has_span = best_evidence.get("span") is not None
+    current_has_span = current_evidence.get("span") is not None
+
+    if current_score < 0.35:
+        return best_page_no, best_page
+    if best_has_span and not current_has_span and best_score >= current_score + 0.05:
+        return best_page_no, best_page
+    if best_score >= current_score + 0.18 and best_overlap >= current_overlap:
+        return best_page_no, best_page
+    return current_page_no, current_page
+
+
 def _qref(branching_logic: str) -> int | None:
     match = re.search(r"\bq\s*(\d+)\b", branching_logic or "", re.IGNORECASE)
     return int(match.group(1)) if match else None
@@ -362,6 +413,12 @@ def _suggest_action(field: str, reasons: list[str]) -> str:
         return "Verify the field type against the visual control"
     if field == "branching_logic":
         return "Check the parent question and conditional option"
+    if field == "question_rule":
+        return "Check the machine-readable conditional rule"
+    if field == "external_id":
+        return "Check the source item code"
+    if field == "branching_source":
+        return "Check the source skip or display wording"
     if field == "answer_text":
         return "Check selectable options or table child values"
     if field == "answer_validation":
@@ -462,6 +519,7 @@ def _review_question_type(row: Row, page: Any) -> dict:
 
 def _review_branching_logic(row: Row, rows_by_sequence: dict[int, Row]) -> dict:
     value = row.branching_logic or ""
+    validation_value = row.question_rule or value
     reasons: list[str] = []
     score = 0.95
     text_norm = _norm(row.question_text)
@@ -472,23 +530,25 @@ def _review_branching_logic(row: Row, rows_by_sequence: dict[int, Row]) -> dict:
             reasons.append("possible_missing_branching_logic")
         return _base_result("branching_logic", value, score, reasons)
 
-    if not re.match(r"^\s*(if|display if)\s+q\d+\s*=", value, re.IGNORECASE):
-        score -= 0.22
-        reasons.append("branching_syntax_unusual")
+    if not re.match(r"^\s*(if|display if)\s+q\d+\s*=", validation_value, re.IGNORECASE):
+        if row.question_rule or re.search(r"\b[A-Z]{1,4}\d{2,5}[A-Z]?\b", value):
+            score -= 0.1
+            reasons.append("branching_source_without_standard_q_rule")
+        else:
+            score -= 0.22
+            reasons.append("branching_syntax_unusual")
 
-    ref = _qref(value)
+    ref = _qref(validation_value)
     parent = _parent_for_ref(rows_by_sequence, ref)
     if ref is None:
-        score -= 0.45
+        score -= 0.22
         reasons.append("branching_ref_missing")
     elif parent is None:
         score -= 0.42
         reasons.append(f"branching_ref_not_found:Q{ref}")
-    elif row.sequence is not None and ref >= row.sequence:
-        score -= 0.25
-        reasons.append(f"branching_forward_ref:Q{ref}")
+    # Forward references are valid for skip logic. Only unresolved refs are risky.
 
-    literal_match = re.search(r"=\s*(.+?)\s*$", value)
+    literal_match = re.search(r"=\s*(.+?)\s*$", validation_value)
     literal = literal_match.group(1).strip(" '\"") if literal_match else ""
     if parent is not None and literal and "checked(selected)" not in literal.lower():
         parent_options = [_norm(option) for option in _split_options(parent.answer_text or "")]
@@ -593,6 +653,18 @@ def _review_required(row: Row) -> dict:
     return _base_result("required", value, score, reasons)
 
 
+def _review_optional_text_field(row: Row, field_name: str) -> dict:
+    value = getattr(row, field_name, "") or ""
+    score = 0.95
+    reasons: list[str] = []
+    if field_name == "question_rule":
+        for ref in re.findall(r"\bq(\d+)\b", value, flags=re.IGNORECASE):
+            if int(ref) <= 0:
+                score -= 0.35
+                reasons.append(f"question_rule_invalid_ref:Q{ref}")
+    return _base_result(field_name, value, score, reasons)
+
+
 def review_row_fields(
     row: Row,
     *,
@@ -607,6 +679,9 @@ def review_row_fields(
         _review_question_type(row, page),
         _review_question_text(row, page),
         _review_branching_logic(row, rows_by_sequence),
+        _review_optional_text_field(row, "question_rule"),
+        _review_optional_text_field(row, "external_id"),
+        _review_optional_text_field(row, "branching_source"),
         _review_answer_text(row),
         _review_answer_validation(row),
         _review_section(row, page),
@@ -667,6 +742,9 @@ def _row_snapshot(row: Row) -> dict[str, Any]:
         "question_type": row.question_type,
         "question_text": row.question_text,
         "branching_logic": row.branching_logic,
+        "question_rule": row.question_rule,
+        "external_id": getattr(row, "external_id", ""),
+        "branching_source": getattr(row, "branching_source", ""),
         "answer_text": row.answer_text,
         "answer_validation": row.answer_validation,
         "required": row.required,
@@ -694,7 +772,9 @@ def build_review_manifest(
     rows_needing_review = 0
 
     for index, row in enumerate(rows):
-        page = _page_for_row(row, pages)
+        resolved_page_no, page = _resolve_row_page(row, pages)
+        if resolved_page_no is not None:
+            row.page = resolved_page_no
         field_reviews = review_row_fields(
             row,
             page=page,
@@ -714,6 +794,8 @@ def build_review_manifest(
 
         row_risk_score = min([row.confidence or 1.0] + [f["confidence"] for f in field_reviews])
         page_evidence = _ordered_text_evidence(row.question_text or "", page, evidence_usage)
+        if page is not None:
+            page_evidence = {**page_evidence, "page": _page_no(page)}
         manifest_rows.append(
             {
                 "row_id": f"row_{index + 1:04d}",
@@ -767,6 +849,62 @@ def _row_action(field_reviews: list[dict], row_confidence: float) -> str:
     if medium_fields:
         return "Spot-check medium-risk fields: " + ", ".join(medium_fields)
     return "Can be accepted unless reviewer sees a visual mismatch"
+
+
+def repair_manifest_page_evidence(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Repair loaded manifests whose rows were assigned to the wrong page."""
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("rows"), list):
+        return manifest
+
+    pages: dict[int, Any] = {}
+    for page_data in manifest.get("pages") or []:
+        try:
+            page_no = int(page_data.get("page") or 0)
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if page_no <= 0:
+            continue
+        pages[page_no] = SimpleNamespace(
+            page_index=page_no - 1,
+            width=page_data.get("width"),
+            height=page_data.get("height"),
+            image_path=page_data.get("image_path", ""),
+            text_blocks=page_data.get("text_blocks") or [],
+            widgets=page_data.get("widgets") or [],
+        )
+
+    if not pages:
+        return manifest
+
+    evidence_usage: Counter[tuple[int, str]] = Counter()
+    for row_data in manifest["rows"]:
+        if not isinstance(row_data, dict):
+            continue
+        snapshot = {**(row_data.get("row") or {})}
+        snapshot.setdefault("sequence", row_data.get("sequence"))
+        snapshot.setdefault("page", row_data.get("page"))
+        snapshot.setdefault("bbox", row_data.get("bbox"))
+        snapshot.setdefault("confidence", row_data.get("row_confidence", 1.0))
+        try:
+            row = Row(**snapshot)
+        except Exception:
+            continue
+
+        resolved_page_no, page = _resolve_row_page(row, pages)
+        if resolved_page_no is not None:
+            row_data["page"] = resolved_page_no
+            row_data.setdefault("row", {})["page"] = resolved_page_no
+        if page is None:
+            continue
+
+        page_evidence = _ordered_text_evidence(row.question_text or "", page, evidence_usage)
+        row_data.setdefault("source", {})["nearest_text_block"] = {
+            **page_evidence,
+            "page": _page_no(page),
+        }
+        row_data["source"]["page_image"] = getattr(page, "image_path", "")
+
+    return manifest
 
 
 def write_review_manifest(path: str | Path, manifest: dict[str, Any]) -> str:

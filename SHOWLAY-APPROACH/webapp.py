@@ -30,16 +30,16 @@ load_dotenv(THIS / ".env")
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+
+from showlay.agentic import extract_document_agentic
 from showlay.confidence import score_rows
-from showlay.extract import (
-    _bedrock_runtime,
-    extract_page_with_qwen,
-    probe_and_rasterize,
-    vlm_dicts_to_rows,
+from showlay.extract import probe_and_rasterize
+from showlay.field_review import (
+    build_review_manifest,
+    repair_manifest_page_evidence,
+    write_review_manifest,
 )
-from showlay.field_review import build_review_manifest, write_review_manifest
 from showlay.paths import RUNTIME_DIR, default_template_path
-from showlay.postprocess import run_all
 from showlay.schema import Row
 from showlay.writer import write_review_sidecar, write_workbook
 
@@ -54,14 +54,14 @@ IMG_DIR.mkdir(parents=True, exist_ok=True)
 
 JOBS: dict[str, dict[str, Any]] = {}
 EXECUTOR = ThreadPoolExecutor(max_workers=2)
-MODEL_ID = os.environ.get("BEDROCK_VLM_MODEL_ID", "qwen.qwen3-vl-235b-a22b")
+MODEL_ID = os.environ.get("BEDROCK_EXTRACTOR_DEFAULT_MODEL_ID", "us.amazon.nova-2-lite-v1:0")
 
 
 app = FastAPI()
 
 
 def _run_pipeline(job_id: str, pdf_path: Path, original_name: str, template_path: Path):
-    """Heavy job: probe + rasterize + per-page Qwen3-VL + post-process + write."""
+    """Heavy job: probe + section-aware Bedrock extraction + review + write."""
     job = JOBS[job_id]
     try:
         t0 = time.time()
@@ -73,25 +73,21 @@ def _run_pipeline(job_id: str, pdf_path: Path, original_name: str, template_path
         job["pages_done"] = 0
         job["raw_row_count"] = 0
 
-        client = _bedrock_runtime()
-        all_raw: list[dict] = []
-        telemetry: list[dict] = []
+        def progress(stage: str, message: str, done: int | None, total: int | None) -> None:
+            job["stage"] = stage
+            job["message"] = message
+            if total is not None:
+                job["section_count"] = total
+            if done is not None:
+                job["sections_done"] = done
+                if total:
+                    job["pages_done"] = min(doc.page_count, round(doc.page_count * done / total))
 
-        job["stage"] = "extract"
-        for ps in doc.pages:
-            job["message"] = f"Extracting page {ps.page_index + 1} of {doc.page_count} (Qwen3-VL)..."
-            rows_dict, tele = extract_page_with_qwen(client, ps, doc, MODEL_ID, verbose=False)
-            for r in rows_dict:
-                r["_page"] = ps.page_index + 1
-            all_raw.extend(rows_dict)
-            telemetry.append(tele)
-            job["pages_done"] = ps.page_index + 1
-            job["raw_row_count"] = len(all_raw)
-
-        job["stage"] = "postprocess"
-        job["message"] = "Post-processing rows..."
-        rows = vlm_dicts_to_rows(all_raw)
-        rows = run_all(rows, doc_struct=doc, truth_path=str(template_path))
+        result = extract_document_agentic(doc, progress=progress)
+        all_raw = result.raw_rows
+        telemetry = result.telemetry
+        rows = result.rows
+        job["raw_row_count"] = len(all_raw)
 
         job["stage"] = "confidence"
         job["message"] = "Scoring confidence..."
@@ -109,6 +105,8 @@ def _run_pipeline(job_id: str, pdf_path: Path, original_name: str, template_path
             source_pdf=str(pdf_path),
             template_path=str(template_path),
         )
+        review_manifest["canonical"] = result.canonical_meta(doc)
+        review_manifest["warnings"] = result.warnings
         manifest_json = OUTPUT_DIR / f"{job_id}_review_manifest.json"
         write_review_manifest(manifest_json, review_manifest)
 
@@ -595,7 +593,7 @@ _INDEX_HTML = """<!doctype html>
   <header>
     <div class="eyebrow">Document Intelligence · POC</div>
     <h1>PDF&nbsp;→&nbsp;Excel form extractor</h1>
-    <p class="sub">Upload a healthcare or insurance form PDF. Receive a 28-column structured workbook and a confidence-sorted human review queue — fastest path from paper to platform.</p>
+    <p class="sub">Upload a healthcare or insurance form PDF. Receive a workbook in the CHOICES Assessment template format and a confidence-sorted human review queue.</p>
   </header>
 
   <section class="card" id="uploadCard">
@@ -626,11 +624,12 @@ _INDEX_HTML = """<!doctype html>
     <h3>Processing</h3>
     <div class="stages">
       <div class="stage" data-key="probe">      <div class="stage-dot">1</div> <span>Probe PDF & rasterize pages</span></div>
-      <div class="stage" data-key="extract">    <div class="stage-dot">2</div> <span>Qwen3-VL page-by-page extraction</span></div>
-      <div class="stage" data-key="postprocess"><div class="stage-dot">3</div> <span>Post-process (24 deterministic stages)</span></div>
-      <div class="stage" data-key="confidence"> <div class="stage-dot">4</div> <span>Confidence scoring</span></div>
-      <div class="stage" data-key="field_review"><div class="stage-dot">5</div> <span>Field-level review manifest</span></div>
-      <div class="stage" data-key="write">      <div class="stage-dot">6</div> <span>Write workbook & review sidecar</span></div>
+      <div class="stage" data-key="profile">    <div class="stage-dot">2</div> <span>Profile document sections</span></div>
+      <div class="stage" data-key="extract">    <div class="stage-dot">3</div> <span>Section-aware Bedrock extraction</span></div>
+      <div class="stage" data-key="postprocess"><div class="stage-dot">4</div> <span>Generic normalization</span></div>
+      <div class="stage" data-key="confidence"> <div class="stage-dot">5</div> <span>Confidence scoring</span></div>
+      <div class="stage" data-key="field_review"><div class="stage-dot">6</div> <span>Field-level review manifest</span></div>
+      <div class="stage" data-key="write">      <div class="stage-dot">7</div> <span>Write workbook & review sidecar</span></div>
     </div>
     <div class="bar"><div class="bar-fill" id="barFill"></div></div>
     <div class="msg" id="statusMsg">Initializing…</div>
@@ -650,7 +649,7 @@ _INDEX_HTML = """<!doctype html>
         </div>
         <div class="dl-body">
           <div class="dl-title">Workbook</div>
-          <div class="dl-meta" id="dlMainSub">28-column extracted Excel</div>
+          <div class="dl-meta" id="dlMainSub">Canonical extracted Excel</div>
         </div>
         <div class="dl-arrow">↓</div>
       </a>
@@ -695,7 +694,7 @@ _INDEX_HTML = """<!doctype html>
   </section>
 
   <footer>
-    Powered by Qwen3-VL on AWS Bedrock <code>us-west-2</code> · ~30s per page · 28-column EAB template<br/>
+    Powered by section-aware Bedrock extraction <code>us-west-2</code> · CHOICES Assessment template output<br/>
     <span style="color:var(--dim)">SHOWLAY v25 · proof-of-concept · not for production health data</span>
   </footer>
 </main>
@@ -753,7 +752,7 @@ submitBtn.addEventListener('click', async () => {
   poll(body.job_id);
 });
 
-const stageOrder = ['probe', 'extract', 'postprocess', 'confidence', 'field_review', 'write', 'done'];
+const stageOrder = ['probe', 'profile', 'extract', 'postprocess', 'confidence', 'field_review', 'write', 'done'];
 function setStage(currentStage) {
   document.querySelectorAll('.stage').forEach(el => {
     const k = el.dataset.key;
@@ -845,6 +844,7 @@ _WORKBENCH_HTML = """<!doctype html>
     color: var(--text);
     font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
+  button, select { font: inherit; }
   .top {
     height: 56px;
     background: var(--surface);
@@ -855,7 +855,26 @@ _WORKBENCH_HTML = """<!doctype html>
     padding: 0 18px;
   }
   .brand { font-weight: 750; color: var(--navy); }
+  .top-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
   .top a { color: var(--blue); text-decoration: none; font-weight: 650; }
+  .top a.export-link {
+    border: 1px solid var(--navy);
+    background: var(--navy);
+    color: #fff;
+    border-radius: 7px;
+    padding: 7px 10px;
+  }
+  .saved-pill {
+    display: none;
+    color: var(--ok);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .saved-pill.show { display: inline; }
   .shell {
     display: grid;
     grid-template-columns: 300px minmax(360px, 1fr) minmax(420px, 0.9fr);
@@ -886,6 +905,39 @@ _WORKBENCH_HTML = """<!doctype html>
     color: var(--navy);
   }
   .hint { color: var(--muted); font-size: 12px; }
+  .page-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .page-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .page-tools select {
+    border: 1px solid #CBD3E0;
+    border-radius: 7px;
+    padding: 6px 9px;
+    color: var(--navy);
+    background: white;
+    font-weight: 650;
+  }
+  .icon-btn {
+    width: 32px;
+    height: 32px;
+    border: 1px solid #CBD3E0;
+    background: var(--surface);
+    color: var(--navy);
+    border-radius: 7px;
+    cursor: pointer;
+    font-weight: 700;
+  }
+  .icon-btn:disabled {
+    color: #A1A9B9;
+    background: var(--surface-2);
+    cursor: not-allowed;
+  }
   .rows {
     overflow: auto;
     padding: 8px;
@@ -1024,7 +1076,12 @@ _WORKBENCH_HTML = """<!doctype html>
 </head><body>
 <div class="top">
   <div class="brand">SHOWLAY · Review Workbench</div>
-  <a href="/">New extraction</a>
+  <div class="top-actions">
+    <span class="saved-pill" id="savedNotice">Saved. Output updated.</span>
+    <a class="export-link" id="exportWorkbook" href="/download/__JOB_ID__">Export</a>
+    <a href="/workbench/__JOB_ID__/edit">Edit</a>
+    <a href="/">New extraction</a>
+  </div>
 </div>
 <main class="shell">
   <section class="panel">
@@ -1038,7 +1095,14 @@ _WORKBENCH_HTML = """<!doctype html>
   <section class="panel">
     <div class="panel-h">
       <h2>PDF page</h2>
-      <span class="hint" id="pageMeta"></span>
+      <div class="page-head-actions">
+        <span class="hint" id="pageMeta"></span>
+        <div class="page-tools">
+          <button class="icon-btn" id="prevPage" onclick="changePage(-1)" title="Previous page">&lt;</button>
+          <select id="pageSelect" onchange="setPage(Number(this.value), true)"></select>
+          <button class="icon-btn" id="nextPage" onclick="changePage(1)" title="Next page">&gt;</button>
+        </div>
+      </div>
     </div>
     <div class="pdf-wrap">
       <div class="page-frame" id="pageFrame">
@@ -1061,6 +1125,7 @@ _WORKBENCH_HTML = """<!doctype html>
 const jobId = "__JOB_ID__";
 let manifest = null;
 let selectedIndex = 0;
+let currentPage = 1;
 
 function riskClass(risk) {
   return risk === 'high' ? 'high' : risk === 'medium' ? 'medium' : 'low';
@@ -1079,15 +1144,33 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;');
 }
 
+function setExportLink(data) {
+  const params = new URLSearchParams(window.location.search);
+  const version = data?.outputs?.updated_at || data?.updated_at || params.get('v') || Date.now();
+  document.getElementById('exportWorkbook').href =
+    `/download/${jobId}?v=${encodeURIComponent(version)}`;
+  if (params.get('saved') === '1') {
+    document.getElementById('savedNotice').classList.add('show');
+  }
+}
+
 function rowTitle(row) {
   const qtype = row.row?.question_type || '';
   const text = row.row?.question_text || '';
   return `${qtype}${qtype && text ? ' · ' : ''}${text}`;
 }
 
+function rowPage(row) {
+  return Number(row?.source?.nearest_text_block?.page || row?.page || row?.row?.page || 0);
+}
+
 function selectRow(index) {
   selectedIndex = index;
+  const row = manifest.rows?.[selectedIndex];
+  const pageNo = rowPage(row);
+  if (pageNo) currentPage = pageNo;
   renderRows();
+  renderPage();
   renderSelected();
 }
 
@@ -1098,7 +1181,7 @@ function renderRows() {
   document.getElementById('rowList').innerHTML = rows.map((row, index) => `
     <button class="row-btn ${index === selectedIndex ? 'active' : ''}" onclick="selectRow(${index})">
       <div class="row-top">
-        <span>Seq ${escapeHtml(row.sequence || '')} · Page ${escapeHtml(row.page || '')}</span>
+        <span>Seq ${escapeHtml(row.sequence || '')} · Page ${escapeHtml(rowPage(row) || '')}</span>
         ${riskBadge(row.risk_level)}
       </div>
       <div class="row-text">${escapeHtml(rowTitle(row))}</div>
@@ -1107,19 +1190,26 @@ function renderRows() {
 }
 
 function bestRect(row, page) {
-  const rowBox = row.bbox;
-  if (Array.isArray(rowBox) && rowBox.length === 4) return rowBox;
-  const sourceRect = row.source?.nearest_text_block?.rect;
-  if (Array.isArray(sourceRect) && sourceRect.length === 4) return sourceRect;
-  const fieldRect = row.fields?.question_text?.evidence?.rect;
-  if (Array.isArray(fieldRect) && fieldRect.length === 4) return fieldRect;
+  const targetPage = Number(page?.page || 0);
+  const source = row?.source?.nearest_text_block;
+  const sourceRect = source?.rect;
+  if (Array.isArray(sourceRect) && sourceRect.length === 4 && (!source?.page || Number(source.page) === targetPage)) {
+    return sourceRect;
+  }
+  const fieldEvidence = row?.fields?.question_text?.evidence;
+  const fieldRect = fieldEvidence?.rect;
+  if (Array.isArray(fieldRect) && fieldRect.length === 4 && (!fieldEvidence?.page || Number(fieldEvidence.page) === targetPage)) {
+    return fieldRect;
+  }
+  const rowBox = row?.bbox;
+  if (Array.isArray(rowBox) && rowBox.length === 4 && rowPage(row) === targetPage) return rowBox;
   return null;
 }
 
 function setHighlight(row, page) {
   const hl = document.getElementById('highlight');
   const rect = bestRect(row, page);
-  if (!rect || !page?.width || !page?.height) {
+  if (!rect || !page?.width || !page?.height || rowPage(row) !== Number(page.page)) {
     hl.style.display = 'none';
     return;
   }
@@ -1129,6 +1219,54 @@ function setHighlight(row, page) {
   hl.style.width = `${100 * Math.max(1, x1 - x0) / page.width}%`;
   hl.style.height = `${100 * Math.max(1, y1 - y0) / page.height}%`;
   hl.style.display = 'block';
+}
+
+function pageList() {
+  return manifest?.pages || [];
+}
+
+function pageByNumber(pageNo) {
+  return pageList().find(page => Number(page.page) === Number(pageNo));
+}
+
+function rowsOnPage(pageNo) {
+  return (manifest.rows || [])
+    .map((row, index) => ({ row, index }))
+    .filter(item => rowPage(item.row) === Number(pageNo));
+}
+
+function currentPageIndex() {
+  return pageList().findIndex(page => Number(page.page) === Number(currentPage));
+}
+
+function renderPageSelector() {
+  const select = document.getElementById('pageSelect');
+  const pages = pageList();
+  select.innerHTML = pages.map(page =>
+    `<option value="${escapeHtml(page.page)}">Page ${escapeHtml(page.page)}</option>`
+  ).join('');
+  select.value = String(currentPage);
+  const index = currentPageIndex();
+  document.getElementById('prevPage').disabled = index <= 0;
+  document.getElementById('nextPage').disabled = index < 0 || index >= pages.length - 1;
+}
+
+function renderPage() {
+  const page = pageByNumber(currentPage);
+  const img = document.getElementById('pageImg');
+  renderPageSelector();
+  if (!page) {
+    img.removeAttribute('src');
+    document.getElementById('pageMeta').textContent = 'Page not found';
+    setHighlight(null, null);
+    return;
+  }
+  const pageRows = rowsOnPage(page.page);
+  document.getElementById('pageMeta').textContent =
+    `Page ${page.page} · ${page.text_blocks?.length || 0} text blocks · ${pageRows.length} rows`;
+  img.onload = () => setHighlight(manifest.rows[selectedIndex], page);
+  img.src = `/page-image/${jobId}/${page.page}`;
+  setHighlight(manifest.rows[selectedIndex], page);
 }
 
 function fieldRows(row) {
@@ -1150,15 +1288,9 @@ function renderSelected() {
     document.getElementById('detail').innerHTML = '<div class="empty">No rows available.</div>';
     return;
   }
-  const page = (manifest.pages || []).find(p => Number(p.page) === Number(row.page));
-  document.getElementById('pageMeta').textContent =
-    `Page ${row.page || '-'} · ${page?.text_blocks?.length || 0} text blocks · ${page?.widgets?.length || 0} widgets`;
   document.getElementById('rowMeta').textContent =
     `Seq ${row.sequence || '-'} · confidence ${row.row_confidence ?? '-'}`;
-  const img = document.getElementById('pageImg');
-  img.onload = () => setHighlight(row, page);
-  img.src = row.page ? `/page-image/${jobId}/${row.page}` : '';
-  setHighlight(row, page);
+  setHighlight(row, pageByNumber(currentPage));
 
   document.getElementById('detail').innerHTML = `
     <div class="summary-line">
@@ -1173,6 +1305,26 @@ function renderSelected() {
   `;
 }
 
+function setPage(pageNo, selectFirstRow = false) {
+  const page = pageByNumber(pageNo);
+  if (!page) return;
+  currentPage = Number(page.page);
+  if (selectFirstRow) {
+    const first = rowsOnPage(currentPage)[0];
+    if (first) selectedIndex = first.index;
+  }
+  renderRows();
+  renderPage();
+  renderSelected();
+}
+
+function changePage(delta) {
+  const pages = pageList();
+  const index = currentPageIndex();
+  const next = pages[Math.max(0, Math.min(pages.length - 1, index + delta))];
+  if (next) setPage(next.page, true);
+}
+
 fetch(`/manifest-data/${jobId}`)
   .then(res => {
     if (!res.ok) throw new Error('Review manifest is not ready.');
@@ -1180,9 +1332,12 @@ fetch(`/manifest-data/${jobId}`)
   })
   .then(data => {
     manifest = data;
+    setExportLink(manifest);
     const firstRisk = (manifest.rows || []).findIndex(row => row.risk_level !== 'low');
     selectedIndex = firstRisk >= 0 ? firstRisk : 0;
+    currentPage = Number(rowPage(manifest.rows?.[selectedIndex]) || manifest.pages?.[0]?.page || 1);
     renderRows();
+    renderPage();
     renderSelected();
   })
   .catch(err => {
@@ -1474,6 +1629,7 @@ _WORKBENCH_EDITOR_HTML = """<!doctype html>
   <div class="top-actions">
     <span class="status" id="saveStatus">No changes yet</span>
     <button class="save-btn" onclick="saveManifest()">Save</button>
+    <a href="/workbench/__JOB_ID__">View</a>
     <a href="/">New extraction</a>
   </div>
 </div>
@@ -1563,6 +1719,10 @@ function currentRow() {
   return (manifest?.rows || [])[selectedIndex];
 }
 
+function rowPage(row) {
+  return Number(row?.source?.nearest_text_block?.page || row?.page || row?.row?.page || 0);
+}
+
 function markDirty(message = 'Unsaved changes') {
   dirty = true;
   const status = document.getElementById('saveStatus');
@@ -1581,7 +1741,8 @@ function selectRow(index, syncPage = true) {
   if (index < 0 || index >= manifest.rows.length) return;
   selectedIndex = index;
   const row = currentRow();
-  if (syncPage && row?.page) currentPage = Number(row.page);
+  const pageNo = rowPage(row);
+  if (syncPage && pageNo) currentPage = pageNo;
   renderRows();
   renderPage();
   renderSelected();
@@ -1597,7 +1758,7 @@ function renderRows() {
          onmouseenter="selectRow(${index})">
       <div class="row-top">
         <span>Seq ${escapeHtml(fieldValue(row, 'sequence') || row.sequence || '')}
-          - Page ${escapeHtml(row.page || fieldValue(row, 'page') || '')}</span>
+          - Page ${escapeHtml(rowPage(row) || fieldValue(row, 'page') || '')}</span>
         ${riskBadge(row.risk_level)}
       </div>
       <div class="row-text">${escapeHtml(rowTitle(row))}</div>
@@ -1615,13 +1776,20 @@ function scrollActiveRow() {
   active?.scrollIntoView({ block: 'nearest' });
 }
 
-function bestRect(row) {
+function bestRect(row, page) {
+  const targetPage = Number(page?.page || 0);
+  const source = row?.source?.nearest_text_block;
+  const sourceRect = source?.rect;
+  if (Array.isArray(sourceRect) && sourceRect.length === 4 && (!source?.page || Number(source.page) === targetPage)) {
+    return sourceRect;
+  }
+  const fieldEvidence = row?.fields?.question_text?.evidence;
+  const fieldRect = fieldEvidence?.rect;
+  if (Array.isArray(fieldRect) && fieldRect.length === 4 && (!fieldEvidence?.page || Number(fieldEvidence.page) === targetPage)) {
+    return fieldRect;
+  }
   const rowBox = row?.bbox;
-  if (Array.isArray(rowBox) && rowBox.length === 4) return rowBox;
-  const sourceRect = row?.source?.nearest_text_block?.rect;
-  if (Array.isArray(sourceRect) && sourceRect.length === 4) return sourceRect;
-  const fieldRect = row?.fields?.question_text?.evidence?.rect;
-  if (Array.isArray(fieldRect) && fieldRect.length === 4) return fieldRect;
+  if (Array.isArray(rowBox) && rowBox.length === 4 && rowPage(row) === targetPage) return rowBox;
   return null;
 }
 
@@ -1632,7 +1800,7 @@ function pageByNumber(pageNo) {
 function rowsOnPage(pageNo) {
   return (manifest.rows || [])
     .map((row, index) => ({ row, index }))
-    .filter(item => Number(item.row.page || item.row.row?.page || 0) === Number(pageNo));
+    .filter(item => rowPage(item.row) === Number(pageNo));
 }
 
 function rectStyle(rect, page) {
@@ -1647,8 +1815,8 @@ function rectStyle(rect, page) {
 
 function setHighlight(row, page) {
   const hl = document.getElementById('highlight');
-  const rect = bestRect(row);
-  if (!rect || !page?.width || !page?.height || Number(row?.page) !== Number(page.page)) {
+  const rect = bestRect(row, page);
+  if (!rect || !page?.width || !page?.height || rowPage(row) !== Number(page.page)) {
     hl.style.display = 'none';
     return;
   }
@@ -1682,7 +1850,7 @@ function renderPage() {
   img.onload = () => setHighlight(currentRow(), page);
   img.src = `/page-image/${jobId}/${page.page}`;
   layer.innerHTML = rowsOnPage(page.page).map(({ row, index }) => {
-    const rect = bestRect(row);
+    const rect = bestRect(row, page);
     if (!rect) return '';
     return `<div class="bbox ${index === selectedIndex ? 'active' : ''}"
       title="${escapeHtml(rowTitle(row))}"
@@ -1930,9 +2098,8 @@ async function saveManifest() {
     manifest = body.manifest;
     dirty = false;
     status.textContent = 'Saved and output updated';
-    renderRows();
-    renderPage();
-    renderSelected();
+    const version = body.outputs?.updated_at || body.manifest?.updated_at || Date.now();
+    window.location.href = `/workbench/${jobId}?saved=1&v=${encodeURIComponent(version)}`;
   } catch (err) {
     status.textContent = err.message;
     status.classList.add('error');
@@ -1948,7 +2115,7 @@ fetch(`/manifest-data/${jobId}`)
     manifest = data;
     const firstRisk = (manifest.rows || []).findIndex(row => row.risk_level !== 'low');
     selectedIndex = firstRisk >= 0 ? firstRisk : 0;
-    currentPage = Number(currentRow()?.page || manifest.pages?.[0]?.page || 1);
+    currentPage = Number(rowPage(currentRow()) || manifest.pages?.[0]?.page || 1);
     renderRows();
     renderPage();
     renderSelected();
@@ -1978,7 +2145,7 @@ def _load_manifest(job_id: str) -> dict[str, Any]:
     path = _manifest_file(job_id)
     if not path.exists():
         raise HTTPException(404, "Review manifest not ready")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return repair_manifest_page_evidence(json.loads(path.read_text(encoding="utf-8")))
 
 
 _REVIEW_FIELD_NAMES = (
@@ -1986,11 +2153,15 @@ _REVIEW_FIELD_NAMES = (
     "question_type",
     "question_text",
     "branching_logic",
+    "question_rule",
+    "external_id",
+    "branching_source",
     "answer_text",
     "answer_validation",
     "section",
     "required",
 )
+_OPTIONAL_REVIEW_FIELD_NAMES = {"question_rule", "external_id", "branching_source"}
 
 
 def _risk_rank(risk: str) -> int:
@@ -2017,16 +2188,17 @@ def _normalize_saved_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         row.setdefault("row", {})
 
         for field_name in _REVIEW_FIELD_NAMES:
+            optional_field = field_name in _OPTIONAL_REVIEW_FIELD_NAMES
             field = row["fields"].setdefault(
                 field_name,
                 {
                     "field": field_name,
                     "value": row["row"].get(field_name, ""),
                     "confidence": 1,
-                    "risk_level": "medium",
-                    "review_reasons": ["manual_review"],
+                    "risk_level": "low" if optional_field else "medium",
+                    "review_reasons": [] if optional_field else ["manual_review"],
                     "evidence": {},
-                    "suggested_action": "Reviewer edited this field",
+                    "suggested_action": "No review needed" if optional_field else "Reviewer edited this field",
                 },
             )
             field.setdefault("field", field_name)
@@ -2148,6 +2320,12 @@ def index() -> HTMLResponse:
 @app.get("/workbench/{job_id}", response_class=HTMLResponse)
 def workbench(job_id: str) -> HTMLResponse:
     _load_manifest(job_id)
+    return HTMLResponse(_WORKBENCH_HTML.replace("__JOB_ID__", job_id))
+
+
+@app.get("/workbench/{job_id}/edit", response_class=HTMLResponse)
+def workbench_edit(job_id: str) -> HTMLResponse:
+    _load_manifest(job_id)
     return HTMLResponse(_WORKBENCH_EDITOR_HTML.replace("__JOB_ID__", job_id))
 
 
@@ -2207,39 +2385,47 @@ def status(job_id: str) -> JSONResponse:
     return JSONResponse(job)
 
 
+def _output_response(job_id: str, path: Path, filename: str, media_type: str) -> FileResponse:
+    job = JOBS.get(job_id)
+    if job and job.get("status") != "done":
+        raise HTTPException(404, "Not ready")
+    if not path.exists():
+        raise HTTPException(404, "Not ready")
+    response = FileResponse(path, filename=filename, media_type=media_type)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.get("/download/{job_id}")
 def download(job_id: str):
     job = JOBS.get(job_id)
-    if not job or job.get("status") != "done":
-        raise HTTPException(404, "Not ready")
-    return FileResponse(
+    return _output_response(
+        job_id,
         OUTPUT_DIR / f"{job_id}.xlsx",
-        filename=job.get("download_name", "output.xlsx"),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        job.get("download_name", "output.xlsx") if job else "output.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
 
 @app.get("/review/{job_id}")
 def review(job_id: str):
     job = JOBS.get(job_id)
-    if not job or job.get("status") != "done":
-        raise HTTPException(404, "Not ready")
-    return FileResponse(
+    return _output_response(
+        job_id,
         OUTPUT_DIR / f"{job_id}_review.xlsx",
-        filename=job.get("review_name", "review.xlsx"),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        job.get("review_name", "review.xlsx") if job else "review.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
 
 @app.get("/manifest/{job_id}")
 def manifest(job_id: str):
     job = JOBS.get(job_id)
-    if not job or job.get("status") != "done":
-        raise HTTPException(404, "Not ready")
-    return FileResponse(
+    return _output_response(
+        job_id,
         OUTPUT_DIR / f"{job_id}_review_manifest.json",
-        filename=job.get("manifest_name", "review_manifest.json"),
-        media_type="application/json",
+        job.get("manifest_name", "review_manifest.json") if job else "review_manifest.json",
+        "application/json",
     )
 
 

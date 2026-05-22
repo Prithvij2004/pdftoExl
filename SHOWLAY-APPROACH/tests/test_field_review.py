@@ -13,6 +13,7 @@ sys.path.insert(0, str(SHOWLAY_DIR))
 
 from showlay.field_review import (  # noqa: E402
     build_review_manifest,
+    repair_manifest_page_evidence,
     review_row_fields,
     write_review_manifest,
 )
@@ -306,8 +307,7 @@ FIELD_CASES = [
         "id": "branching_forward_ref",
         "field": "branching_logic",
         "rows": [_row(sequence=2, branching_logic="If Q2 = Yes")],
-        "risk": "medium",
-        "reason": "branching_forward_ref:Q2",
+        "risk": "low",
     },
     {
         "id": "branching_literal_not_parent_option",
@@ -525,6 +525,73 @@ def test_build_review_manifest_includes_page_cache_and_field_summary():
     assert manifest["pages"][0]["text_blocks"]
     assert manifest["rows"][1]["fields"]["question_type"]["risk_level"] == "high"
     assert manifest["rows"][0]["source"]["raw_vlm_index"] == 0
+
+
+def test_build_review_manifest_moves_bbox_evidence_to_matching_page():
+    page1 = _page("Applicant Name")
+    page1.page_index = 0
+    page2 = _page("Service Coordinator Signature")
+    page2.page_index = 1
+    page2.text_blocks[0]["rect"] = [100, 300, 260, 314]
+    doc = FakeDoc(pages=[page1, page2])
+    rows = [
+        _row(
+            sequence=1,
+            page=1,
+            question_type="Signature",
+            question_text="Service Coordinator Signature",
+        )
+    ]
+
+    manifest = build_review_manifest(rows, doc_struct=doc)
+    row = manifest["rows"][0]
+
+    assert row["page"] == 2
+    assert row["row"]["page"] == 2
+    assert row["source"]["nearest_text_block"]["page"] == 2
+    assert row["source"]["nearest_text_block"]["rect"] == [100, 300, 260, 314]
+
+
+def test_repair_manifest_page_evidence_updates_loaded_manifest_rows():
+    manifest = {
+        "pages": [
+            {
+                "page": 1,
+                "image_path": "/tmp/p1.png",
+                "text_blocks": [{"text": "Applicant Name", "rect": [10, 10, 100, 22]}],
+            },
+            {
+                "page": 2,
+                "image_path": "/tmp/p2.png",
+                "text_blocks": [
+                    {"text": "Service Coordinator Signature", "rect": [100, 300, 260, 314]}
+                ],
+            },
+        ],
+        "rows": [
+            {
+                "sequence": 1,
+                "page": 1,
+                "row_confidence": 1,
+                "row": {
+                    "sequence": 1,
+                    "page": 1,
+                    "question_type": "Signature",
+                    "question_text": "Service Coordinator Signature",
+                },
+                "source": {},
+            }
+        ],
+    }
+
+    repaired = repair_manifest_page_evidence(manifest)
+    row = repaired["rows"][0]
+
+    assert row["page"] == 2
+    assert row["row"]["page"] == 2
+    assert row["source"]["page_image"] == "/tmp/p2.png"
+    assert row["source"]["nearest_text_block"]["page"] == 2
+    assert row["source"]["nearest_text_block"]["rect"] == [100, 300, 260, 314]
 
 
 def test_compound_signature_labels_use_local_repeated_field_bbox():
