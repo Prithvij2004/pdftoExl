@@ -124,6 +124,10 @@ def _run_pipeline(job_id: str, pdf_path: Path, original_name: str, template_path
             json.dumps(all_raw, indent=2, ensure_ascii=False), encoding="utf-8")
         (debug_dir / "telemetry.json").write_text(
             json.dumps(telemetry, indent=2), encoding="utf-8")
+        (debug_dir / "profile.json").write_text(
+            json.dumps(result.profile.model_dump(), indent=2, ensure_ascii=False), encoding="utf-8")
+        (debug_dir / "extraction_policy.json").write_text(
+            json.dumps(result.extraction_policy.model_dump(), indent=2, ensure_ascii=False), encoding="utf-8")
 
         job["stage"] = "done"
         job["status"] = "done"
@@ -625,11 +629,12 @@ _INDEX_HTML = """<!doctype html>
     <div class="stages">
       <div class="stage" data-key="probe">      <div class="stage-dot">1</div> <span>Probe PDF & rasterize pages</span></div>
       <div class="stage" data-key="profile">    <div class="stage-dot">2</div> <span>Profile document sections</span></div>
-      <div class="stage" data-key="extract">    <div class="stage-dot">3</div> <span>Section-aware Bedrock extraction</span></div>
-      <div class="stage" data-key="postprocess"><div class="stage-dot">4</div> <span>Generic normalization</span></div>
-      <div class="stage" data-key="confidence"> <div class="stage-dot">5</div> <span>Confidence scoring</span></div>
-      <div class="stage" data-key="field_review"><div class="stage-dot">6</div> <span>Field-level review manifest</span></div>
-      <div class="stage" data-key="write">      <div class="stage-dot">7</div> <span>Write workbook & review sidecar</span></div>
+      <div class="stage" data-key="policy">     <div class="stage-dot">3</div> <span>Build extraction policy</span></div>
+      <div class="stage" data-key="extract">    <div class="stage-dot">4</div> <span>Section-aware Bedrock extraction</span></div>
+      <div class="stage" data-key="postprocess"><div class="stage-dot">5</div> <span>Generic normalization</span></div>
+      <div class="stage" data-key="confidence"> <div class="stage-dot">6</div> <span>Confidence scoring</span></div>
+      <div class="stage" data-key="field_review"><div class="stage-dot">7</div> <span>Field-level review manifest</span></div>
+      <div class="stage" data-key="write">      <div class="stage-dot">8</div> <span>Write workbook & review sidecar</span></div>
     </div>
     <div class="bar"><div class="bar-fill" id="barFill"></div></div>
     <div class="msg" id="statusMsg">Initializing…</div>
@@ -752,7 +757,7 @@ submitBtn.addEventListener('click', async () => {
   poll(body.job_id);
 });
 
-const stageOrder = ['probe', 'profile', 'extract', 'postprocess', 'confidence', 'field_review', 'write', 'done'];
+const stageOrder = ['probe', 'profile', 'policy', 'extract', 'postprocess', 'confidence', 'field_review', 'write', 'done'];
 function setStage(currentStage) {
   document.querySelectorAll('.stage').forEach(el => {
     const k = el.dataset.key;

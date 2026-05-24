@@ -157,17 +157,32 @@ These rules **inflate accuracy on the development set and degrade it on novel fo
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
+│  STAGE 2.5: EXTRACTION POLICY AGENT (1 LLM call, mid-tier model)    │
+│  Input: full per-page text/widget evidence + profile + sections     │
+│         + selected page images for layout clues                     │
+│  Output: PDF-specific instructions for:                             │
+│   • how this PDF shows each Question Taxonomy type                  │
+│   • how each canonical field appears in this PDF                    │
+│   • repeated chrome / false fields to ignore                        │
+│   • section-specific exceptions and ambiguous patterns              │
+│  Rule: this agent does NOT extract rows and does NOT add columns.    │
+│  Its output is guidance pasted into Stage 3 prompts.                 │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
 │  STAGE 3: SECTION EXTRACTOR (N LLM calls, one per section OR one)   │
 │  Per-section input:                                                 │
 │   • Page images for this section                                    │
 │   • Widgets + text blocks scoped to these pages                     │
 │   • Textract output (tables/forms/layout) scoped to these pages     │
+│   • Stage 2.5 extraction policy, narrowed to this section           │
 │   • Document context:                                               │
 │       - form_title                                                  │
 │       - ALL section names (so agent knows where to point branches)  │
 │       - this section's name and position                            │
 │       - shared_legends carried forward from earlier sections        │
-│   • Pydantic schema (Bedrock tool-use) defining the row contract    │
+│   • Pydantic JSON schema defining the row contract                  │
 │  Output: list of row objects per canonical schema (req-analysis §5) │
 │  Model: low-cost tier default, mid-tier if profiler said "complex"  │
 │  (specific Bedrock model IDs are configurable — see §5)             │
@@ -236,14 +251,16 @@ backend/
 ├── pipeline/
 │   ├── stage1_ingest.py             # PyMuPDF + Textract routing
 │   ├── stage2_profiler.py           # Document profiler agent
+│   ├── stage2b_policy.py            # PDF-specific extraction policy agent
 │   ├── stage3_extractor.py          # Section extractor agent
 │   ├── stage4_normalizer.py         # Generic normalization (10 fns)
 │   ├── stage5_manifest.py           # Review manifest builder
 │   └── stage6_export.py             # Fixed-schema Excel writer
 ├── agents/
 │   ├── profiler_agent.py            # Bedrock client + prompt for Stage 2
+│   ├── policy_agent.py              # Bedrock client + prompt for Stage 2.5
 │   ├── extractor_agent.py           # Bedrock client + prompt for Stage 3
-│   └── tool_schemas.py              # Pydantic schemas for tool-use
+│   └── tool_schemas.py              # Pydantic schemas for JSON output
 ├── excel/
 │   ├── canonical_columns.py         # Fixed output headers + schema version
 │   ├── writer.py                    # Generate canonical workbook
@@ -315,10 +332,10 @@ Identify:
 4. Complexity: simple (1-page form, mostly text), medium (multi-page, fillable),
    complex (cross-page sections, skip logic, coded items)
 
-Output JSON via the tool schema.
+Output valid JSON matching the provided schema.
 ```
 
-**Tool schema (Bedrock tool-use, Pydantic):**
+**JSON schema (LangChain `ChatBedrockConverse`, Pydantic):**
 ```python
 class DocumentProfile(BaseModel):
     form_title: str
@@ -330,7 +347,55 @@ class DocumentProfile(BaseModel):
     recommended_model_tier: Literal["low_cost", "mid_tier"]
 ```
 
-Strict structured output via tool-use eliminates the JSON parsing fragility SHOWLAY has with Qwen3-VL.
+Profiler output is requested through LangChain `ChatBedrockConverse` and
+validated with the `DocumentProfile` Pydantic schema.
+
+### 4.2.5 Stage 2.5 — Extraction Policy Agent
+
+This agent runs after section planning and before extraction. It uses LangChain
+`ChatBedrockConverse` to read the full PDF evidence map, the profiler output,
+planned sections, widgets, text blocks, source_ids, and selected page images.
+
+Its output is not workbook rows. It is a structured policy that explains how
+this PDF represents the canonical extraction target:
+
+```python
+class QuestionTypePolicy(BaseModel):
+    question_type: str
+    pdf_clues: list[str]              # how this type looks in the page images/text/widgets
+    instruction: str                  # how to recognize this type in this PDF
+    question_text_instruction: str    # how to choose the visible prompt/label/instruction text
+    answer_text_instruction: str      # printed selectable option labels only, not filled values
+    branching_instruction: str        # how this type carries skip/display/applicability wording
+
+class SectionPromptPolicy(BaseModel):
+    question_types: list[str]
+    excel_columns: list[str]
+    global_instructions: list[str]
+    ignore_patterns: list[str]
+    question_type_guidance: list[QuestionTypePolicy]
+    field_guidance: list[FieldExtractionPolicy]
+    section_guidance: list[SectionExtractionPolicy]
+
+class ExtractionPolicy(BaseModel):
+    policy: SectionPromptPolicy
+    form_summary: str
+    warnings: list[str]
+```
+
+Prompt rule:
+
+```text
+You are creating an extraction policy for a healthcare PDF form.
+Your job is NOT to extract final rows.
+Put the allowed question types, target Excel columns, and PDF-specific extraction
+rules inside policy. form_summary and warnings are only for debugging.
+Do not add workbook columns. Return only structured JSON.
+```
+
+Stage 3 receives only the nested `policy` object in every section prompt. If the
+policy conflicts with visible evidence, the extractor follows visible evidence
+and adds a warning.
 
 ### 4.3 Stage 3 — Section Extractor
 
@@ -341,14 +406,16 @@ For each section (or once for whole document if `single_call`):
 - Widget list scoped to these pages (with bboxes and labels)
 - Text blocks scoped to these pages (with bboxes and source_ids T###/W###)
 - Textract tables/forms/layout for these pages
+- Nested `policy` object from Stage 2.5, narrowed to the current section
 - Document context bundle:
   - form_title, all_section_names, this_section_name, this_section_position
   - shared_legends carried from earlier sections
 
 **Prompt structure:**
 ```
-You are extracting structured rows from one section of a healthcare PDF form
-template.
+You are extracting canonical rows from one section of a healthcare PDF form
+template. Use the extraction policy as the source of truth for allowed question
+types, target Excel columns, and PDF-specific field rules.
 
 Document context:
 - Form: <form_title>
@@ -368,45 +435,14 @@ Source-of-truth precedence:
   bbox/traceability). Widget names like 'Text2' or 'undefined_3' are NOT
   question text. Widget values are NOT answer values (the templates are blank).
 
-Extraction rules (these are HIP conventions, not form-specific):
+Generic extraction rules:
+- Do not invent rows, question types, columns, answer options, branching,
+  required markers, or source ids.
+- Do not use question types or target columns outside the policy.
+- If the policy conflicts with visible evidence in this section, follow visible
+  evidence and add a warning.
 
-1. Every MEANINGFUL FORM ARTIFACT becomes one row: questions, input fields,
-   choice groups, section markers, instructional/legal display text, signature
-   lines, tables, and clinically relevant display content.
-
-2. EXCLUDE page chrome: page numbers, repeated headers/footers, watermarks,
-   form titles repeated in headers, agency banners, regulatory codes, and
-   decorative separators — unless they define a section or are a required
-   display instruction.
-
-3. Question text = visible PDF text including item codes (e.g. "B0200. Hearing").
-
-4. For choice fields: list options separated by \n\n.
-
-5. Section markers: emit a Display row with question_text="New Section" and
-   answer_text=<section title>.
-
-6. Branching: emit BOTH branching_source (verbatim PDF wording, item codes
-   preserved) AND branching_logic (using Q<sequence> form; sequence will be
-   assigned later). Forward branching references are valid — skip logic
-   legitimately points forward.
-
-7. Item codes: capture into external_id field. external_id is internal
-   metadata for traceability and branch resolution — it is NOT the Excel
-   External ID column.
-
-8. Question rule: ONLY emit when the PDF clearly describes a visibility/
-   applicability condition for the current row. Default blank — do not
-   invent values.
-
-9. source_ids: list the T### and W### IDs from the input that ground each row.
-
-Important: any concrete example given (item codes, section names, option
-literals) is ILLUSTRATIVE ONLY. Do not assume the incoming PDF follows any
-specific sample form. Use visible layout, rendered text, section context, and
-source evidence to infer the correct row structure.
-
-Output JSON via the tool schema.
+Output valid JSON matching the provided schema.
 ```
 
 **Tool schema:**
@@ -539,15 +575,15 @@ Model selection is **configurable** and **benchmark-driven**. This project does 
 
 | Model | Model ID | Role suited for | Why |
 |---|---|---|---|
-| Amazon Nova 2 Lite | `us.amazon.nova-2-lite-v1:0` | Document profiler, simple/medium section extraction | Lowest-cost default among the preferred candidates; supports image input and Bedrock tool-use |
+| Amazon Nova 2 Lite | `us.amazon.nova-2-lite-v1:0` | Document profiler, simple/medium section extraction | Lowest-cost default among the preferred candidates; supports image input through Converse |
 | Amazon Nova Pro | `us.amazon.nova-pro-v1:0` | Complex-section extraction, branching resolution, coded scales | Stronger multimodal reasoning than Nova 2 Lite; use only when profiler tags a section `complex` |
-| Qwen3-VL | `qwen.qwen3-vl-235b-a22b` | Baseline and strict-region fallback | Already integrated in SHOWLAY; supports image input and Bedrock tool-use; benchmark again under the new section-aware pipeline |
-| Mistral Large 3 | `mistral.mistral-large-3-675b-instruct` | Complex-section fallback / benchmark contender | Supports image input and Bedrock tool-use in `us-west-2`; useful if Nova Pro is unavailable or underperforms |
-| Kimi K2.5 | `moonshotai.kimi-k2.5` | Hard retry / benchmark contender | Supports image input and Bedrock tool-use in `us-west-2`; use for difficult extraction retries before human review |
+| Qwen3-VL | `qwen.qwen3-vl-235b-a22b` | Baseline and strict-region fallback | Already integrated in SHOWLAY; supports image input; benchmark again under the new section-aware pipeline |
+| Mistral Large 3 | `mistral.mistral-large-3-675b-instruct` | Complex-section fallback / benchmark contender | Supports image input in `us-west-2`; useful if Nova Pro is unavailable or underperforms |
+| Kimi K2.5 | `moonshotai.kimi-k2.5` | Hard retry / benchmark contender | Supports image input in `us-west-2`; use for difficult extraction retries before human review |
 
 Use the `us.` Nova inference-profile IDs above. Direct IDs such as `amazon.nova-pro-v1:0` are not the default config because they may fail when on-demand throughput is unsupported. Exact model IDs are configurable via `BEDROCK_PROFILER_MODEL_ID`, `BEDROCK_EXTRACTOR_DEFAULT_MODEL_ID`, `BEDROCK_EXTRACTOR_COMPLEX_MODEL_ID`, and `BEDROCK_EXTRACTOR_RETRY_MODEL_ID`.
 
-These candidates were validated in the target setup with Bedrock model listing plus Converse smoke tests for image input and tool-use structured output. Re-check access during deployment because IAM, SCPs, and model lifecycle state can change.
+These candidates were validated in the target setup with Bedrock model listing plus Converse smoke tests for image input and JSON output. Re-check access during deployment because IAM, SCPs, and model lifecycle state can change.
 
 ### 5.2 Selection strategy
 
@@ -743,7 +779,8 @@ This is what "open-ended scope" means in practice: new PDFs work without code be
 **Goals:** End-to-end extraction for 1-page and small multi-page forms.
 
 **Deliverables:**
-- Stage 2 document profiler agent + prompt + tool-use schema
+- Stage 2 document profiler agent + prompt + Pydantic-validated JSON schema
+- Stage 2.5 extraction policy agent + prompt + Pydantic-validated JSON schema
 - Stage 3 section extractor (single_call mode only) + prompt + schema
 - Stage 4 generic normalizer (~9 functions)
 - Stage 5 manifest builder
@@ -853,7 +890,7 @@ Cross-referencing every gap identified across `suggestions.md`, the requirement 
 | Human-in-loop NL correction | Deferred — UI's inline cell edit + save flow works today |
 | Cost concern for POC | Nova 2 Lite default, Nova Pro escalation only when profiler tags `complex`; Qwen3-VL, Mistral Large 3, and Kimi K2.5 benchmarked for performance comparison |
 | AWS-locked platform | Bedrock + Textract; no cross-cloud dependencies |
-| Brittle JSON parsing (Qwen3-VL string JSON) | Native Bedrock tool-use with Pydantic |
+| Brittle JSON parsing (Qwen3-VL string JSON) | `ChatBedrockConverse` with Pydantic-validated JSON |
 | Golden workbook used during extraction | Removed completely; comparator (eval) uses it offline |
 | Section detection across pages | Stage 2 profiler outputs sections with page ranges |
 | Shared coding legends invisible to later pages | Stage 2 captures; Stage 3 carries forward per section |

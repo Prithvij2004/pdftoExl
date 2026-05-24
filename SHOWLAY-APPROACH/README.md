@@ -16,9 +16,10 @@ PDF
  ├─ widgets        (PyMuPDF AcroForm walk → bboxes + field-types when interactive)
  ├─ text_layout    (PyMuPDF get_text("dict") → words with bboxes — coordinate-grounded text)
  │
- ├─ profile        (LangGraph node calls Bedrock tool-use for title, sections, complexity)
+ ├─ profile        (LangGraph node calls ChatBedrockConverse for title, sections, complexity)
+ ├─ policy         (LangGraph node builds PDF-specific extraction instructions)
  │
- ├─ section extract (LangGraph loop calls Bedrock tool-use per section or one call for small forms)
+ ├─ section extract (ChatBedrockConverse JSON per section, guided by policy.policy only)
  │
  ├─ normalize      (LangGraph node densifies sections, sequences, branching refs, validation defaults)
  │
@@ -27,19 +28,21 @@ PDF
  └─ write          (CHOICES workbook `Assessment` sheet structure; companion *_review.xlsx for human queue)
 ```
 
-The profiler, section planner, section extractor, and normalizer now run through
+The profiler, section planner, policy builder, section extractor, and normalizer now run through
 `showlay.agentic.document_extraction_graph`, a compiled LangGraph `StateGraph`.
 `run.py`, `run_new_pdfs.py`, and `webapp.py` keep using `extract_document_agentic`,
 so CLI and web behavior stay stable while the orchestration is graph-based.
 
-Textract is not required in this implementation. The interface can be added later, but the current path works from PyMuPDF evidence plus Bedrock vision/tool-use.
+Textract is not required in this implementation. The interface can be added later, but the current path works from PyMuPDF evidence plus Bedrock vision calls.
 
 ## Key decisions (with sources)
 
 - **Default profiler = Amazon Nova 2 Lite on Bedrock us-west-2** via `us.amazon.nova-2-lite-v1:0`.
+- **Default extraction policy agent = Amazon Nova Pro** via `us.amazon.nova-pro-v1:0`.
 - **Default section extractor = Amazon Nova Pro** via `us.amazon.nova-pro-v1:0`, with env overrides still supported.
+- **Profiler, policy, and section extraction calls use LangChain `ChatBedrockConverse`** with Pydantic-validated JSON.
 - **Extraction orchestration uses LangGraph `StateGraph`** so profiling, section planning, extraction, and normalization are explicit nodes.
-- **Structured output uses Bedrock tool-use + Pydantic schemas**, not loose JSON parsing.
+- **Structured output uses Pydantic-validated JSON**, not loose JSON parsing or Bedrock tool-use.
 - **Excel output uses the bundled CHOICES HIP workbook's `Assessment` sheet**, not `Assessment v2`.
 - **Forward branching refs are allowed** because skip logic can point to later questions.
 

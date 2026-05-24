@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -47,12 +48,18 @@ def _risk_level(row: Row) -> str:
     return "low"
 
 
+def _safe_excel_value(value):
+    if isinstance(value, str):
+        return ILLEGAL_CHARACTERS_RE.sub("", value)
+    return value
+
+
 def _excel_value(field_name: str, row: Row):
     value = getattr(row, field_name, "")
     if field_name == "section" and isinstance(value, str):
         if " ".join(value.split()).strip().lower() == _UNSECTIONED_CONTENT:
             return ""
-    return value
+    return _safe_excel_value(value)
 
 
 def _find_header_row(ws) -> int:
@@ -143,17 +150,17 @@ def write_review_sidecar(out_path: str, rows: list[Row]) -> str:
     sorted_rows = sorted(rows, key=lambda r: (r.confidence, r.sequence or 0))
     for i, r in enumerate(sorted_rows, start=2):
         ws.cell(row=i, column=1, value=r.confidence)
-        ws.cell(row=i, column=2, value=_risk_level(r))
+        ws.cell(row=i, column=2, value=_safe_excel_value(_risk_level(r)))
         ws.cell(row=i, column=3, value=r.page or "")
         ws.cell(row=i, column=4, value=r.sequence or "")
-        ws.cell(row=i, column=5, value=r.question_type)
-        ws.cell(row=i, column=6, value=r.question_text)
+        ws.cell(row=i, column=5, value=_safe_excel_value(r.question_type))
+        ws.cell(row=i, column=6, value=_safe_excel_value(r.question_text))
         ws.cell(row=i, column=7, value=_excel_value("section", r))
-        ws.cell(row=i, column=8, value=r.answer_text)
-        ws.cell(row=i, column=9, value=r.answer_validation)
-        ws.cell(row=i, column=10, value=r.branching_logic)
-        ws.cell(row=i, column=11, value=r.question_rule)
-        ws.cell(row=i, column=12, value="; ".join(r.review_reasons))
+        ws.cell(row=i, column=8, value=_safe_excel_value(r.answer_text))
+        ws.cell(row=i, column=9, value=_safe_excel_value(r.answer_validation))
+        ws.cell(row=i, column=10, value=_safe_excel_value(r.branching_logic))
+        ws.cell(row=i, column=11, value=_safe_excel_value(r.question_rule))
+        ws.cell(row=i, column=12, value=_safe_excel_value("; ".join(r.review_reasons)))
         fill = _confidence_fill(r.confidence)
         if fill:
             for c in range(1, len(headers) + 1):

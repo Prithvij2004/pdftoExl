@@ -80,6 +80,10 @@ def main():
         json.dumps(result.profile.model_dump(), indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+    (debug_dir / "extraction_policy.json").write_text(
+        json.dumps(result.extraction_policy.model_dump(), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
     print(f"      agent produced {len(rows)} normalized rows")
 
     # 5. confidence
