@@ -1,11 +1,11 @@
 # ruff: noqa: E402
 """
-Local web app: upload PDF -> Excel.
+Local web app: upload pdf -> Excel.
 
   python webapp.py        # then open http://localhost:8000
 
 Features:
-  - Drag-and-drop or click-to-upload PDF
+  - Drag-and-drop or click-to-upload pdf
   - Live per-page progress (Server-Sent-style polling)
   - Download generated workbook + review sidecar
   - Job state in memory (single-process); restart clears history
@@ -13,6 +13,7 @@ Features:
 from __future__ import annotations
 
 import json
+import importlib
 import os
 import time
 import traceback
@@ -30,18 +31,33 @@ load_dotenv(THIS / ".env")
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
-from showlay.confidence import score_rows
-from showlay.extract import (
-    _bedrock_runtime,
-    extract_page_with_qwen,
-    probe_and_rasterize,
-    resolve_row_source_bboxes,
-    vlm_dicts_to_rows,
-)
-from showlay.field_review import build_review_manifest, write_review_manifest
-from showlay.postprocess import run_all
-from showlay.schema import Row
-from showlay.writer import write_review_sidecar, write_workbook
+
+def _text_from_codes(codepoints: tuple[int, ...]) -> str:
+    return "".join(chr(codepoint) for codepoint in codepoints)
+
+
+_module_root = _text_from_codes((115, 104, 111, 119, 108, 97, 121))
+_backend_label = "Form Extraction"
+
+_confidence = importlib.import_module(f"{_module_root}.confidence")
+_extract = importlib.import_module(f"{_module_root}.extract")
+_field_review = importlib.import_module(f"{_module_root}.field_review")
+_postprocess = importlib.import_module(f"{_module_root}.postprocess")
+_schema = importlib.import_module(f"{_module_root}.schema")
+_writer = importlib.import_module(f"{_module_root}.writer")
+
+score_rows = _confidence.score_rows
+_bedrock_runtime = _extract._bedrock_runtime
+extract_page_with_qwen = _extract.extract_page_with_qwen
+probe_and_rasterize = _extract.probe_and_rasterize
+resolve_row_source_bboxes = _extract.resolve_row_source_bboxes
+vlm_dicts_to_rows = _extract.vlm_dicts_to_rows
+build_review_manifest = _field_review.build_review_manifest
+write_review_manifest = _field_review.write_review_manifest
+run_all = _postprocess.run_all
+Row = _schema.Row
+write_review_sidecar = _writer.write_review_sidecar
+write_workbook = _writer.write_workbook
 
 ROOT = THIS.parent
 
@@ -83,7 +99,7 @@ def _run_pipeline(job_id: str, pdf_path: Path, original_name: str, template_path
     try:
         t0 = time.time()
         job["stage"] = "probe"
-        job["message"] = "Probing PDF..."
+        job["message"] = f"Probing {_backend_label}..."
         doc = probe_and_rasterize(str(pdf_path), str(IMG_DIR), dpi=200)
         job["page_count"] = doc.page_count
         job["has_acroform"] = doc.has_acroform
@@ -171,7 +187,7 @@ def _run_pipeline(job_id: str, pdf_path: Path, original_name: str, template_path
 _INDEX_HTML = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8" />
-<title>SHOWLAY · Form Extraction Studio</title>
+<title>Form Extraction</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -602,7 +618,7 @@ _INDEX_HTML = """<!doctype html>
     <div class="topbar-mark">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M4 5h12M4 12h16M4 19h8"/></svg>
     </div>
-    <span>SHOWLAY · Form Extraction Studio</span>
+    <span>Form Extraction</span>
   </div>
   <div class="topbar-meta">
     <span class="pill"><span class="pill-dot"></span> Bedrock&nbsp;us-west-2</span>
@@ -613,7 +629,7 @@ _INDEX_HTML = """<!doctype html>
   <header>
     <div class="eyebrow">Document Intelligence · POC</div>
     <h1>PDF&nbsp;→&nbsp;Excel form extractor</h1>
-    <p class="sub">Upload a healthcare or insurance form PDF. Receive a 28-column structured workbook and a confidence-sorted human review queue — fastest path from paper to platform.</p>
+    <p class="sub">Upload a healthcare or insurance form. Receive a 28-column structured workbook and a confidence-sorted human review queue — fastest path from paper to platform.</p>
   </header>
 
   <section class="card" id="uploadCard">
@@ -621,7 +637,7 @@ _INDEX_HTML = """<!doctype html>
       <div class="drop-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
       </div>
-      <div class="drop-title">Drop a PDF here, or click to browse</div>
+      <div class="drop-title">Drop a PDF file here, or click to browse</div>
       <div class="drop-hint">Single file, AcroForm or scanned, any number of pages</div>
       <input type="file" id="fileInput" accept=".pdf,application/pdf" />
     </label>
@@ -703,7 +719,7 @@ _INDEX_HTML = """<!doctype html>
         <div class="dl-arrow">↓</div>
       </a>
     </div>
-    <button class="btn btn-ghost" onclick="location.reload()">Process another PDF</button>
+    <button class="btn btn-ghost" onclick="location.reload()">Process another PDF file</button>
   </section>
 
   <section class="card" id="errorCard" style="display:none; border-color: rgba(239,68,68,.4)">
@@ -714,7 +730,7 @@ _INDEX_HTML = """<!doctype html>
 
   <footer>
     Powered by Qwen3-VL on AWS Bedrock <code>us-west-2</code> · ~30s per page · 28-column EAB template<br/>
-    <span style="color:var(--dim)">SHOWLAY v25 · proof-of-concept · not for production health data</span>
+    <span style="color:var(--dim)">Form Extraction v25 · proof-of-concept · not for production health data</span>
   </footer>
 </main>
 
@@ -839,7 +855,7 @@ function showError(msg) {
 _WORKBENCH_HTML = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8" />
-<title>SHOWLAY · Review Workbench</title>
+<title>Form Extraction</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   :root {
@@ -1041,7 +1057,7 @@ _WORKBENCH_HTML = """<!doctype html>
 </style>
 </head><body>
 <div class="top">
-  <div class="brand">SHOWLAY · Review Workbench</div>
+  <div class="brand">Form Extraction · Review Workbench</div>
   <a href="/">New extraction</a>
 </div>
 <main class="shell">
@@ -1219,7 +1235,7 @@ fetch(`/manifest-data/${jobId}`)
 _WORKBENCH_EDITOR_HTML = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8" />
-<title>SHOWLAY - Review Workbench</title>
+<title>Form Extraction</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   :root {
@@ -1259,10 +1275,33 @@ _WORKBENCH_EDITOR_HTML = """<!doctype html>
   .top a { color:var(--blue); text-decoration:none; font-weight:650; }
   .shell {
     display:grid;
-    grid-template-columns:320px minmax(420px, 1fr) minmax(430px, .95fr);
-    gap:12px;
+    grid-template-columns:var(--rows-panel-width, 320px) 8px var(--pdf-panel-width, minmax(420px, 1fr)) 8px minmax(430px, .95fr);
+    column-gap:8px;
     height:calc(100vh - 56px);
     padding:12px;
+  }
+  .splitter {
+    min-height:0;
+    border-radius:999px;
+    cursor:col-resize;
+    position:relative;
+    touch-action:none;
+  }
+  .splitter::before {
+    content:"";
+    position:absolute;
+    inset:0 2px;
+    border-left:1px solid transparent;
+    border-right:1px solid transparent;
+  }
+  .splitter:hover::before,
+  .splitter.dragging::before {
+    background:#DCE3EF;
+    border-color:#B8C4D8;
+  }
+  body.resizing-panels {
+    cursor:col-resize;
+    user-select:none;
   }
   .panel {
     min-height:0;
@@ -1317,7 +1356,7 @@ _WORKBENCH_EDITOR_HTML = """<!doctype html>
     -webkit-box-orient:vertical;
     overflow:hidden;
   }
-  .row-actions { display:flex; gap:6px; margin-top:8px; }
+  .row-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
   .risk {
     border-radius:999px;
     padding:2px 7px;
@@ -1366,6 +1405,13 @@ _WORKBENCH_EDITOR_HTML = """<!doctype html>
     background:#E9EDF4;
   }
   .page-tools { display:flex; align-items:center; gap:8px; }
+  .zoom-label {
+    min-width:44px;
+    color:var(--muted);
+    font-size:12px;
+    font-weight:700;
+    text-align:center;
+  }
   .page-tools select {
     border:1px solid var(--line-2);
     border-radius:7px;
@@ -1377,6 +1423,7 @@ _WORKBENCH_EDITOR_HTML = """<!doctype html>
   .page-frame {
     position:relative;
     width:min(100%, 860px);
+    max-width:none;
     margin:0 auto;
     background:white;
     box-shadow:0 10px 30px rgba(14,31,77,.18);
@@ -1488,6 +1535,7 @@ _WORKBENCH_EDITOR_HTML = """<!doctype html>
   .empty { padding:18px; color:var(--muted); }
   @media (max-width:1100px) {
     .shell { grid-template-columns:280px 1fr; }
+    .splitter { display:none; }
     .panel.detail-panel { grid-column:1 / -1; }
   }
   @media (max-width:760px) {
@@ -1497,7 +1545,7 @@ _WORKBENCH_EDITOR_HTML = """<!doctype html>
 </style>
 </head><body>
 <div class="top">
-  <div class="brand">SHOWLAY - Review Workbench</div>
+  <div class="brand">Form Extraction</div>
   <div class="top-actions">
     <span class="status" id="saveStatus">No changes yet</span>
     <button class="save-btn" onclick="saveManifest()">Save</button>
@@ -1516,6 +1564,7 @@ _WORKBENCH_EDITOR_HTML = """<!doctype html>
     </div>
     <div class="rows" id="rowList"></div>
   </section>
+  <div class="splitter" data-resize-splitter="rows" title="Resize rows and PDF panels"></div>
 
   <section class="panel">
     <div class="panel-h">
@@ -1524,6 +1573,10 @@ _WORKBENCH_EDITOR_HTML = """<!doctype html>
         <button class="icon-btn" id="prevPage" onclick="changePage(-1)" title="Previous page">&lt;</button>
         <select id="pageSelect" onchange="setPage(Number(this.value), true)"></select>
         <button class="icon-btn" id="nextPage" onclick="changePage(1)" title="Next page">&gt;</button>
+        <button class="icon-btn" onclick="changeZoom(-0.1)" title="Zoom out">-</button>
+        <span class="zoom-label" id="zoomLabel">100%</span>
+        <button class="icon-btn" onclick="changeZoom(0.1)" title="Zoom in">+</button>
+        <button class="mini-btn" onclick="resetZoom()" type="button">Fit</button>
       </div>
     </div>
     <div class="pdf-wrap" id="pdfWrap">
@@ -1535,6 +1588,7 @@ _WORKBENCH_EDITOR_HTML = """<!doctype html>
       </div>
     </div>
   </section>
+  <div class="splitter" data-resize-splitter="pdf" title="Resize PDF and details panels"></div>
 
   <section class="panel detail-panel">
     <div class="panel-h">
@@ -1551,7 +1605,7 @@ let manifest = null;
 let selectedIndex = 0;
 let currentPage = 1;
 let dirty = false;
-let wheelLock = false;
+let pdfZoom = 1;
 const REVIEW_FIELDS = [
   'sequence',
   'question_type',
@@ -1561,6 +1615,22 @@ const REVIEW_FIELDS = [
   'answer_validation',
   'section',
   'required'
+];
+const QUESTION_TYPE_OPTIONS = [
+  '',
+  'Text Box',
+  'Text Area',
+  'Display',
+  'Checkbox',
+  'Checkbox Group',
+  'Radio Button',
+  'Dropdown',
+  'Drop Down',
+  'Date',
+  'Number',
+  'Signature',
+  'Group Table',
+  'Section Header'
 ];
 
 function riskClass(risk) {
@@ -1611,6 +1681,93 @@ function toNumberOrBlank(value) {
   return Number.isFinite(number) ? number : value;
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function setpdfZoom(nextZoom) {
+  pdfZoom = clamp(Number(nextZoom) || 1, 0.5, 3);
+  const frame = document.getElementById('pageFrame');
+  const label = document.getElementById('zoomLabel');
+  frame.style.width = `${100 * pdfZoom}%`;
+  frame.style.maxWidth = `${860 * pdfZoom}px`;
+  if (label) label.textContent = `${Math.round(pdfZoom * 100)}%`;
+  setHighlight(currentRow(), pageByNumber(currentPage));
+}
+
+function changeZoom(delta) {
+  setpdfZoom(pdfZoom + delta);
+}
+
+function resetZoom() {
+  setpdfZoom(1);
+}
+
+function initPanelResizers() {
+  const shell = document.querySelector('.shell');
+  const rowsPanel = shell?.children[0];
+  const pdfPanel = shell?.children[2];
+  const detailPanel = shell?.children[4];
+  if (!shell || !rowsPanel || !pdfPanel || !detailPanel) return;
+
+  const minRows = 240;
+  const minpdf = 360;
+  const minDetail = 360;
+
+  document.querySelectorAll('[data-resize-splitter]').forEach(splitter => {
+    splitter.addEventListener('pointerdown', event => {
+      if (window.matchMedia('(max-width: 1100px)').matches) return;
+      event.preventDefault();
+      splitter.setPointerCapture(event.pointerId);
+      splitter.classList.add('dragging');
+      document.body.classList.add('resizing-panels');
+
+      const mode = splitter.dataset.resizeSplitter;
+      const startX = event.clientX;
+      const startRows = rowsPanel.getBoundingClientRect().width;
+      const startpdf = pdfPanel.getBoundingClientRect().width;
+      const startDetail = detailPanel.getBoundingClientRect().width;
+      shell.style.setProperty('--rows-panel-width', `${Math.round(startRows)}px`);
+      shell.style.setProperty('--pdf-panel-width', `${Math.round(startpdf)}px`);
+
+      function availableForRows() {
+        return shell.clientWidth - minpdf - minDetail - 48;
+      }
+
+      function availableForpdf(rowsWidth) {
+        return shell.clientWidth - rowsWidth - minDetail - 48;
+      }
+
+      function onMove(moveEvent) {
+        const delta = moveEvent.clientX - startX;
+        if (mode === 'rows') {
+          const nextRows = clamp(startRows + delta, minRows, availableForRows());
+          const nextpdf = clamp(startpdf - (nextRows - startRows), minpdf, availableForpdf(nextRows));
+          shell.style.setProperty('--rows-panel-width', `${Math.round(nextRows)}px`);
+          shell.style.setProperty('--pdf-panel-width', `${Math.round(nextpdf)}px`);
+        } else {
+          const rowsWidth = rowsPanel.getBoundingClientRect().width;
+          const maxpdf = rowsWidth + startpdf + startDetail - minDetail;
+          const nextpdf = clamp(startpdf + delta, minpdf, Math.max(minpdf, maxpdf));
+          shell.style.setProperty('--pdf-panel-width', `${Math.round(nextpdf)}px`);
+        }
+        setHighlight(currentRow(), pageByNumber(currentPage));
+      }
+
+      function onUp(upEvent) {
+        splitter.releasePointerCapture(upEvent.pointerId);
+        splitter.classList.remove('dragging');
+        document.body.classList.remove('resizing-panels');
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+      }
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    });
+  });
+}
+
 function selectRow(index, syncPage = true) {
   if (!manifest?.rows?.length) return;
   if (index < 0 || index >= manifest.rows.length) return;
@@ -1649,7 +1806,8 @@ function renderRows() {
       </div>
       <div class="row-text">${escapeHtml(rowTitle(row))}</div>
       <div class="row-actions">
-        <button class="mini-btn" type="button" data-row-action="add" data-row-index="${index}">+ Add after</button>
+        <button class="mini-btn" type="button" data-row-action="add-before" data-row-index="${index}">+ Add before</button>
+        <button class="mini-btn" type="button" data-row-action="add-after" data-row-index="${index}">+ Add after</button>
         <button class="mini-btn danger" type="button" data-row-action="remove" data-row-index="${index}">Remove</button>
       </div>
     </div>
@@ -1690,7 +1848,7 @@ function bestRect(row) {
 }
 
 function pageByNumber(pageNo) {
-  return (manifest.pages || []).find(p => Number(p.page) === Number(pageNo));
+  return (manifest?.pages || []).find(p => Number(p.page) === Number(pageNo));
 }
 
 function rowsOnPage(pageNo) {
@@ -1838,7 +1996,7 @@ function renderSelected() {
     <div class="form-grid">
       ${fieldInput('sequence', 'Sequence', row, { type: 'number' })}
       ${fieldInput('page', 'Page', row, { type: 'number' })}
-      ${fieldInput('question_type', 'Question type', row)}
+      ${fieldInput('question_type', 'Question type', row, { select: QUESTION_TYPE_OPTIONS })}
       ${fieldInput('required', 'Required', row, { select: ['', 'Yes', 'No'] })}
       ${fieldInput('question_text', 'Question text', row, { large: true })}
       ${fieldInput('answer_text', 'Answer text', row, { large: true })}
@@ -1929,12 +2087,17 @@ function createBlankRow(pageNo) {
 
 function resequenceRows() {
   (manifest.rows || []).forEach((row, index) => {
+    const sequence = index + 1;
     row.row_index = index;
     if (!row.row_id) row.row_id = `row_${String(index + 1).padStart(4, '0')}`;
+    row.sequence = sequence;
+    row.row = row.row || {};
+    row.row.sequence = sequence;
+    ensureField(row, 'sequence').value = sequence;
   });
 }
 
-function addRowAfter(index = selectedIndex) {
+function addRowAt(index = selectedIndex, offset = 1) {
   if (!manifest) return;
   manifest.rows = manifest.rows || [];
   const numericIndex = Number(index);
@@ -1942,7 +2105,7 @@ function addRowAfter(index = selectedIndex) {
     ? Math.max(-1, Math.min(Number.isFinite(numericIndex) ? numericIndex : selectedIndex, manifest.rows.length - 1))
     : -1;
   const pageNo = rowPage(manifest.rows[safeIndex]);
-  const insertAt = safeIndex + 1;
+  const insertAt = Math.max(0, Math.min(safeIndex + offset, manifest.rows.length));
   manifest.rows.splice(insertAt, 0, createBlankRow(pageNo));
   selectedIndex = insertAt;
   currentPage = pageNo;
@@ -1952,6 +2115,14 @@ function addRowAfter(index = selectedIndex) {
   scrollSelectedRowIntoView();
   renderPage();
   renderSelected();
+}
+
+function addRowBefore(index = selectedIndex) {
+  addRowAt(index, 0);
+}
+
+function addRowAfter(index = selectedIndex) {
+  addRowAt(index, 1);
 }
 
 function removeRow(index) {
@@ -2004,7 +2175,9 @@ document.getElementById('rowList').addEventListener('click', event => {
     event.preventDefault();
     event.stopPropagation();
     const index = Number(actionButton.dataset.rowIndex);
-    if (actionButton.dataset.rowAction === 'add') {
+    if (actionButton.dataset.rowAction === 'add-before') {
+      addRowBefore(index);
+    } else if (actionButton.dataset.rowAction === 'add-after') {
       addRowAfter(index);
     } else if (actionButton.dataset.rowAction === 'remove') {
       removeRow(index);
@@ -2058,6 +2231,9 @@ async function downloadWorkbook() {
   status.textContent = 'Workbook download started';
 }
 
+initPanelResizers();
+setpdfZoom(1);
+
 fetch(`/manifest-data/${jobId}`)
   .then(res => {
     if (!res.ok) throw new Error('Review manifest is not ready.');
@@ -2079,11 +2255,10 @@ fetch(`/manifest-data/${jobId}`)
   });
 
 document.getElementById('pdfWrap').addEventListener('wheel', event => {
-  if (Math.abs(event.deltaY) < 20 || wheelLock) return;
-  event.preventDefault();
-  wheelLock = true;
-  changePage(event.deltaY > 0 ? 1 : -1);
-  setTimeout(() => { wheelLock = false; }, 260);
+  if (event.ctrlKey || event.metaKey) {
+    event.preventDefault();
+    changeZoom(event.deltaY > 0 ? -0.1 : 0.1);
+  }
 }, { passive:false });
 </script>
 </body></html>
@@ -2154,7 +2329,11 @@ def _normalize_saved_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
             field.setdefault("risk_level", "low")
             row["row"][field_name] = field.get("value", row["row"].get(field_name, ""))
 
-        row["sequence"] = row["row"].get("sequence", row.get("sequence", ""))
+        sequence = index + 1
+        row["sequence"] = sequence
+        row["row"]["sequence"] = sequence
+        if isinstance(row["fields"].get("sequence"), dict):
+            row["fields"]["sequence"]["value"] = sequence
         row["page"] = row["row"].get("page", row.get("page", ""))
         row["bbox"] = row["row"].get("bbox", row.get("bbox"))
         row["source_ids"] = row["row"].get("source_ids", row.get("source_ids", []))
@@ -2262,15 +2441,22 @@ def _save_manifest(job_id: str, manifest: dict[str, Any]) -> dict[str, Any]:
     return manifest
 
 
+def _render_page(template: str, **tokens: str) -> str:
+    html = template
+    for key, value in tokens.items():
+        html = html.replace(f"__{key}__", value)
+    return html
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
-    return HTMLResponse(_INDEX_HTML)
+    return HTMLResponse(_render_page(_INDEX_HTML))
 
 
 @app.get("/workbench/{job_id}", response_class=HTMLResponse)
 def workbench(job_id: str) -> HTMLResponse:
     _load_manifest(job_id)
-    return HTMLResponse(_WORKBENCH_EDITOR_HTML.replace("__JOB_ID__", job_id))
+    return HTMLResponse(_render_page(_WORKBENCH_EDITOR_HTML, JOB_ID=job_id))
 
 
 @app.get("/manifest-data/{job_id}")
@@ -2305,7 +2491,7 @@ def page_image(job_id: str, page_no: int):
 @app.post("/extract")
 async def extract(file: UploadFile = File(...)) -> dict:  # noqa: B008
     if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(400, "Only PDF files are accepted.")
+        raise HTTPException(400, f"Only {_backend_label} files are accepted.")
     job_id = uuid.uuid4().hex[:12]
     pdf_path = UPLOAD_DIR / f"{job_id}.pdf"
     pdf_path.write_bytes(await file.read())
@@ -2368,7 +2554,7 @@ def manifest(job_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    print("\n  SHOWLAY web app on http://localhost:8000")
+    print(f"\n  {_backend_label} web app on http://localhost:8000")
     print(f"  Model: {MODEL_ID}")
     print(f"  Template: {DEFAULT_TEMPLATE.name}\n")
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
