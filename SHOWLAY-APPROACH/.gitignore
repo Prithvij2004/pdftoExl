@@ -1,0 +1,38 @@
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+
+# Python bytecode + venv
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.python-version
+
+# Generated runtime artifacts (large; reproducible by re-running)
+runtime/page_images/
+runtime/uploads/
+runtime/uploads_web/
+runtime/extracted/
+runtime/output_web/
+runtime/output_agentic/
+runtime/CHOICES_diff.txt
+runtime/TXLTSS_diff.txt
+runtime/CHOICES_1to1_v21.txt
+runtime/visual_dump.txt
+runtime/page_images_web/
+
+# Eval reports (large + per-run; keep summary.md examples only if explicitly committed)
+eval_reports/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log
+nohup.out
