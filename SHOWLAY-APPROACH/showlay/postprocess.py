@@ -28,6 +28,57 @@ def _full_normtext(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip().lower())
 
 
+def _row_text_fields(row: Row) -> tuple[str, ...]:
+    return (
+        "section",
+        "question_type",
+        "question_text",
+        "branching_logic",
+        "answer_text",
+        "answer_validation",
+        "question_rule",
+        "talking_points",
+        "alt_question_text",
+        "alt_answer_text",
+        "alert_text",
+        "it_notes",
+    )
+
+
+_TEXT_REPLACEMENTS = {
+    "\ufffd": "'",
+    "\uf0fc": "",
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201c": '"',
+    "\u201d": '"',
+    "\u2013": "-",
+    "\u2014": "-",
+}
+
+
+def _clean_text_artifacts(value: str) -> str:
+    text = value or ""
+    for bad, good in _TEXT_REPLACEMENTS.items():
+        text = text.replace(bad, good)
+    return re.sub(r"[ \t]{2,}", " ", text).strip()
+
+
+def normalize_text_artifacts(rows: list[Row]) -> list[Row]:
+    """Normalize common PDF/OCR text artifacts in every workbook text field.
+
+    This is intentionally content-agnostic: it fixes Unicode replacement glyphs,
+    private-use checkbox marks, smart quotes, and dash variants wherever they occur
+    instead of targeting any particular form.
+    """
+    for row in rows:
+        for field in _row_text_fields(row):
+            value = getattr(row, field, "")
+            if isinstance(value, str) and value:
+                setattr(row, field, _clean_text_artifacts(value))
+    return rows
+
+
 def _strip_fill_marks(s: str) -> str:
     s = re.sub(r"[_]{3,}.*?$", "", s or "")
     return re.sub(r"\s+", " ", s).strip()
@@ -175,6 +226,12 @@ def drop_repeated_page_bands(rows: list[Row], doc_struct=None, min_recur_pages: 
         key = _chrome_key(txt)
         if key in repeated_lines and qt == "display":
             continue
+        section_title_key = _chrome_key(r.answer_text)
+        if qt == "display" and txt.lower() == "new section" and (
+            section_title_key in repeated_lines
+            or _CHROME_TEXT_RE.search(r.answer_text or "")
+        ):
+            continue
         field_key = _strip_for_dedup(_HEADER_PREFIX_RE.sub("", txt))
         if field_key in repeated_fields and qt in ("text box", "date", "number"):
             if field_key in seen_fields:
@@ -195,6 +252,45 @@ def dedupe_consecutive(rows: list[Row]) -> list[Row]:
             continue
         out.append(r)
         last_key = key
+    return out
+
+
+_INPUT_ROW_TYPES = {
+    "text box", "text area", "date", "number", "signature",
+}
+
+
+def merge_duplicate_display_input_labels(rows: list[Row]) -> list[Row]:
+    """Drop a Display label when the immediately following input row carries the
+    same prompt.
+
+    Many forms render a prompt followed by a large blank response box. VLMs often
+    emit both as:
+
+        Display  | Prompt text
+        Text Area| Prompt text
+
+    The workbook needs the input row, not an extra display row. This pass only
+    removes adjacent high-confidence label duplicates and preserves role banners,
+    section markers, and non-input followers.
+    """
+    out: list[Row] = []
+    i = 0
+    while i < len(rows):
+        row = rows[i]
+        qt = (row.question_type or "").strip().lower()
+        text = (row.question_text or "").strip()
+        if qt == "display" and text.lower() != "new section" and i + 1 < len(rows):
+            nxt = rows[i + 1]
+            nqt = (nxt.question_type or "").strip().lower()
+            if nqt in _INPUT_ROW_TYPES:
+                left = _schema_label_key(text)
+                right = _schema_label_key(nxt.question_text)
+                if left and right and (left == right or left.rstrip(":") == right.rstrip(":")):
+                    i += 1
+                    continue
+        out.append(row)
+        i += 1
     return out
 
 
@@ -280,7 +376,8 @@ def repair_question_text(rows: list[Row], doc_struct=None) -> list[Row]:
         if qt_low == "display" and txt.lower() == "new section":
             current_role, current_role_colon = "", False
             continue
-        if txt.lower() not in _GENERIC_LABELS:
+        generic_key = _schema_label_key(txt).rstrip(":")
+        if generic_key not in _GENERIC_LABELS:
             continue
 
         # Prefer AcroForm widget field_label when we have bbox + page.
@@ -296,7 +393,7 @@ def repair_question_text(rows: list[Row], doc_struct=None) -> list[Row]:
         if widget_label and len(widget_label.split()) >= 3:
             r.question_text = widget_label + (":" if widget_label and not widget_label.endswith(":") else "")
         elif current_role:
-            new_text = f"{current_role} {txt}".strip()
+            new_text = f"{current_role} {txt.rstrip(':')}".strip()
             r.question_text = new_text + (":" if current_role_colon else "")
     return rows
 
@@ -447,6 +544,34 @@ def _split_cell_lines(value: str) -> list[str]:
     else:
         parts = s.split("\n")
     return [p.strip() for p in parts if p.strip()]
+
+
+_ATTACHMENT_CHECKLIST_RE = re.compile(
+    r"\b(?:attach|attachment|documentation|documents?|records?|check all|check and complete|"
+    r"supporting documentation|provided with this request)\b",
+    re.IGNORECASE,
+)
+
+
+def coerce_long_instruction_choices(rows: list[Row]) -> list[Row]:
+    """Avoid classifying long document/checklist instructions as Radio Button rows.
+
+    True radio options are short mutually exclusive choices. If a row has long
+    attachment/documentation options or "check all" language, it should behave as a
+    checklist. This is based on option shape and prompt language, not on form names.
+    """
+    for row in rows:
+        qt = (row.question_type or "").strip().lower()
+        if qt != "radio button":
+            continue
+        options = _split_cell_lines(row.answer_text)
+        if not options:
+            continue
+        long_options = sum(1 for option in options if len(option.split()) >= 8 or len(option) >= 60)
+        prompt = f"{row.question_text or ''} {row.answer_text or ''}"
+        if long_options and _ATTACHMENT_CHECKLIST_RE.search(prompt):
+            row.question_type = "Checkbox Group"
+    return rows
 
 
 def separate_answer_validation(rows: list[Row]) -> list[Row]:
@@ -2508,6 +2633,7 @@ def expand_packed_group_table_columns(rows: list[Row], truth_path: str | None = 
 
 
 def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> list[Row]:
+    rows = normalize_text_artifacts(rows)
     rows = drop_chrome(rows)
     rows = drop_repeated_page_bands(rows, doc_struct)
     rows = split_header_band(rows)
@@ -2518,6 +2644,7 @@ def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> 
     rows = merge_bullet_list_displays(rows)
     rows = collapse_choice_groups(rows)
     rows = normalize_choice_options(rows)
+    rows = coerce_long_instruction_choices(rows)
     rows = split_compound_choice_rows(rows)
     rows = split_attached_text_options(rows)
     rows = dedupe_attached_text_children(rows)
@@ -2536,6 +2663,8 @@ def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> 
     rows = resolve_pending_branching(rows)
     rows = repair_question_text(rows, doc_struct)
     rows = clean_question_text(rows)
+    rows = merge_duplicate_display_input_labels(rows)
+    rows = normalize_text_artifacts(rows)
     rows = propagate_section(rows)                     # internal: forward-fill for context
     rows = normalize_branching(rows)
     rows = normalize_branching_yes_no(rows)
@@ -2553,7 +2682,9 @@ def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> 
     rows = assign_sequence(rows)
     rows = branch_existing_attached_text_children(rows)
     rows = normalize_choice_options(rows)
+    rows = coerce_long_instruction_choices(rows)
     rows = separate_answer_validation(rows)
     rows = repair_branching_reference_numbers(rows)
     rows = clear_spurious_option_branches(rows)
+    rows = normalize_text_artifacts(rows)
     return rows
