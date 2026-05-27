@@ -1047,6 +1047,15 @@ _DEFAULT_ANSWER_TEXT_BY_TYPE = {
 }
 
 
+_DEFAULT_ANSWER_VALIDATION_BY_TYPE = {
+    "text box": "default characters = 100",
+    "text area": "default characters = 600",
+    "date": "Format is mm/dd/yyyy",
+    "number": "numeric-only",
+    "signature": "Signature area",
+}
+
+
 def detect_answer_text_convention(truth_path: str | None) -> str:
     """Return 'answer_text' or 'answer_validation' based on which column the truth
     template populates for INPUT ROWS' validation hints.
@@ -1130,6 +1139,23 @@ def populate_answer_text_defaults(rows: list[Row], target_field: str = "answer_t
             if not default:
                 continue
         setattr(r, target_field, default)
+    return rows
+
+
+def populate_answer_validation_defaults(rows: list[Row]) -> list[Row]:
+    """Fill generic validation hints for typed input rows when blank.
+
+    This is intentionally column-specific and non-destructive: it only fills
+    Answer Validation for input-like question types and preserves every existing
+    extracted value. Choice rows keep their options in Answer Text.
+    """
+    for r in rows:
+        if (r.answer_validation or "").strip():
+            continue
+        qt = (r.question_type or "").strip().lower()
+        default = _DEFAULT_ANSWER_VALIDATION_BY_TYPE.get(qt)
+        if default:
+            r.answer_validation = default
     return rows
 
 
@@ -2686,5 +2712,7 @@ def run_all(rows: list[Row], doc_struct=None, truth_path: str | None = None) -> 
     rows = separate_answer_validation(rows)
     rows = repair_branching_reference_numbers(rows)
     rows = clear_spurious_option_branches(rows)
+    rows = populate_answer_validation_defaults(rows)
+    rows = separate_answer_validation(rows)
     rows = normalize_text_artifacts(rows)
     return rows

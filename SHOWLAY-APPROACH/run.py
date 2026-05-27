@@ -28,6 +28,7 @@ THIS_DIR = Path(__file__).resolve().parent
 load_dotenv(THIS_DIR / ".env")
 
 from showlay.confidence import score_rows
+from showlay.acroform import enrich_rows_from_acroform
 from showlay.eval import evaluate
 from showlay.extract import extract_document, probe_and_rasterize, resolve_row_source_bboxes, vlm_dicts_to_rows
 from showlay.field_review import build_review_manifest, write_review_manifest
@@ -72,6 +73,7 @@ def main():
     (debug_dir / "telemetry.json").write_text(json.dumps(telemetry, indent=2), encoding="utf-8")
 
     rows = vlm_dicts_to_rows(raw, doc_struct=doc)
+    rows = enrich_rows_from_acroform(rows, doc)
     print(f"      VLM produced {len(rows)} row dicts")
 
     # 4. post-process

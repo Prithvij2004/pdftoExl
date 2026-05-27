@@ -12,6 +12,7 @@ THIS = Path(__file__).resolve().parent
 load_dotenv(THIS / ".env")
 
 from showlay.extract import probe_and_rasterize, extract_document, resolve_row_source_bboxes, vlm_dicts_to_rows
+from showlay.acroform import enrich_rows_from_acroform
 from showlay.postprocess import run_all
 from showlay.confidence import score_rows
 from showlay.writer import write_workbook, write_review_sidecar
@@ -52,6 +53,7 @@ for stem, fname in PDFS:
     (debug_dir / "telemetry.json").write_text(json.dumps(telemetry, indent=2), encoding="utf-8")
 
     rows = vlm_dicts_to_rows(raw, doc_struct=doc)
+    rows = enrich_rows_from_acroform(rows, doc)
     print(f"      VLM produced {len(rows)} raw rows")
 
     print(f"[3/5] post-process ...")

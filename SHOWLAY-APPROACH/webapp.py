@@ -40,6 +40,7 @@ _module_root = _text_from_codes((115, 104, 111, 119, 108, 97, 121))
 _backend_label = "Form Extraction"
 
 _confidence = importlib.import_module(f"{_module_root}.confidence")
+_acroform = importlib.import_module(f"{_module_root}.acroform")
 _extract = importlib.import_module(f"{_module_root}.extract")
 _field_review = importlib.import_module(f"{_module_root}.field_review")
 _postprocess = importlib.import_module(f"{_module_root}.postprocess")
@@ -47,6 +48,7 @@ _schema = importlib.import_module(f"{_module_root}.schema")
 _writer = importlib.import_module(f"{_module_root}.writer")
 
 score_rows = _confidence.score_rows
+enrich_rows_from_acroform = _acroform.enrich_rows_from_acroform
 _bedrock_runtime = _extract._bedrock_runtime
 extract_page_with_qwen = _extract.extract_page_with_qwen
 probe_and_rasterize = _extract.probe_and_rasterize
@@ -124,6 +126,7 @@ def _run_pipeline(job_id: str, pdf_path: Path, original_name: str, template_path
         job["stage"] = "postprocess"
         job["message"] = "Post-processing rows..."
         rows = vlm_dicts_to_rows(all_raw, doc_struct=doc)
+        rows = enrich_rows_from_acroform(rows, doc)
         rows = run_all(rows, doc_struct=doc, truth_path=str(template_path))
         rows = resolve_row_source_bboxes(rows, doc)
 
